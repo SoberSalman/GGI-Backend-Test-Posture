@@ -7,6 +7,7 @@ function providerWith(config: Partial<MockAiConfig>): MockOpenAiProvider {
     minDelayMs: 20,
     maxDelayMs: 40,
     model: 'gpt-4o-mini',
+    timeoutMs: 5_000,
     ...config,
   };
   return new MockOpenAiProvider({

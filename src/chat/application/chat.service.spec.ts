@@ -8,6 +8,7 @@ import { QuotaReservation, QuotaService } from './quota.service';
 const FREE_RESERVATION: QuotaReservation = {
   source: QuotaSource.FREE_TIER,
   subscriptionId: null,
+  periodKey: '2026-08',
   remainingAfter: 2,
 };
 
@@ -39,8 +40,7 @@ describe('ChatService', () => {
           Promise.resolve(Object.assign(new ChatMessage(), { id: 'msg-1' }, message)),
         ),
       findPageForUser: jest.fn(),
-      countInMonth: jest.fn().mockResolvedValue(3),
-      sumTokensThisMonth: jest.fn().mockResolvedValue(120),
+      monthToDateUsage: jest.fn().mockResolvedValue({ messages: 3, tokens: 120 }),
     } as unknown as jest.Mocked<ChatMessageRepository>;
 
     const moduleRef = await Test.createTestingModule({
@@ -100,6 +100,7 @@ describe('ChatService', () => {
     quota.reserve.mockResolvedValue({
       source: QuotaSource.SUBSCRIPTION,
       subscriptionId: 'sub-1',
+      periodKey: null,
       remainingAfter: 9,
     });
 

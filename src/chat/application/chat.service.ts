@@ -1,7 +1,11 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ChatMessage } from '../domain/chat-message.entity';
 import { AiProviderError } from '../domain/chat.errors';
-import { ChatMessageRepository, HistoryPage } from '../infrastructure/chat-message.repository';
+import {
+  ChatMessageRepository,
+  HistoryPage,
+  MonthToDateUsage,
+} from '../infrastructure/chat-message.repository';
 import { AiProvider } from './ai-provider.port';
 import { QuotaReservation, QuotaService } from './quota.service';
 
@@ -18,10 +22,9 @@ export interface AskResult {
 /**
  * The ask-a-question use case.
  *
- * Sequence: reserve quota (short, locked transaction) -> call the provider
- * (slow, no locks held) -> persist the exchange. The provider call sits outside
- * the transaction on purpose: holding a row lock across a multi-second network
- * call would serialise every other request for that user.
+ * Reserve quota (short, locked transaction), call the provider (slow, no locks
+ * held), then persist. Holding a row lock across a multi-second network call
+ * would serialise every other request for that user.
  */
 @Injectable()
 export class ChatService {
@@ -70,12 +73,7 @@ export class ChatService {
     return this.messages.findPageForUser(userId, page, limit);
   }
 
-  /** Message and token totals for the current calendar month. */
-  async monthlyUsage(userId: string, now: Date): Promise<{ messages: number; tokens: number }> {
-    const [messages, tokens] = await Promise.all([
-      this.messages.countInMonth(userId, now),
-      this.messages.sumTokensThisMonth(userId, now),
-    ]);
-    return { messages, tokens };
+  async monthlyUsage(userId: string, now: Date): Promise<MonthToDateUsage> {
+    return this.messages.monthToDateUsage(userId, now);
   }
 }

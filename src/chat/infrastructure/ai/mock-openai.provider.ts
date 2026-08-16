@@ -10,12 +10,8 @@ import {
 } from '../../application/ai-provider.port';
 
 /**
- * Stand-in for the OpenAI Chat Completions API.
- *
- * Mirrors the parts of the real client the application depends on: a network
- * delay (randomised inside `MOCK_AI_MIN_DELAY_MS`..`MOCK_AI_MAX_DELAY_MS`), a
- * model name, and a prompt/completion token breakdown. Replacing this class
- * with a real client requires no change above the port.
+ * Stand-in for the OpenAI Chat Completions API: randomised network delay, a
+ * model name, and a prompt/completion token breakdown.
  */
 @Injectable()
 export class MockOpenAiProvider extends AiProvider {
@@ -29,7 +25,7 @@ export class MockOpenAiProvider extends AiProvider {
 
   async complete(request: CompletionRequest): Promise<CompletionResult> {
     const startedAt = Date.now();
-    await delay(this.randomLatency());
+    await this.withTimeout(delay(this.randomLatency()));
 
     const answer = this.composeAnswer(request.question);
     const usage = estimateUsage(request.question, answer);
@@ -40,6 +36,21 @@ export class MockOpenAiProvider extends AiProvider {
     );
 
     return { answer, model: this.config.model, usage, latencyMs };
+  }
+
+  /**
+   * A completion that never returns would strand the reserved quota: the
+   * request holds a message the caller can never spend and never gets back.
+   */
+  private async withTimeout<T>(work: Promise<T>): Promise<T> {
+    const timeout = new Promise<never>((_resolve, reject) =>
+      setTimeout(
+        () => reject(new Error(`Completion timed out after ${this.config.timeoutMs}ms`)),
+        this.config.timeoutMs,
+      ).unref(),
+    );
+
+    return Promise.race([work, timeout]);
   }
 
   private randomLatency(): number {
@@ -65,9 +76,8 @@ export class MockOpenAiProvider extends AiProvider {
 /**
  * Approximates tokenisation at the well-known ~4 characters per token ratio.
  *
- * ponytail: good enough for usage accounting in a mock. Swap in the provider's
- * reported `usage` object the moment a real client is wired up — never ship
- * this heuristic as the basis for billing real money.
+ * Good enough for a mock. Swap in the provider's reported `usage` the moment a
+ * real client is wired up; never bill real money off this.
  */
 export function estimateUsage(question: string, answer: string): TokenUsage {
   const promptTokens = estimateTokens(question);

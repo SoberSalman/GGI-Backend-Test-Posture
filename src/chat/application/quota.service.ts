@@ -11,11 +11,12 @@ import { QuotaSource } from '../domain/chat-message.entity';
 import { QuotaExceededError } from '../domain/chat.errors';
 import { FreeQuotaRepository } from '../infrastructure/free-quota.repository';
 
-/** A single response held for the caller, pending a successful AI call. */
 export interface QuotaReservation {
   source: QuotaSource;
   /** Set only when the response came out of a bundle. */
   subscriptionId: string | null;
+  /** Month the free message was taken from, so a late refund can't cross into the next one. */
+  periodKey: string | null;
   /** Responses left in whatever allowance was charged. `null` for unlimited. */
   remainingAfter: number | null;
 }
@@ -36,8 +37,7 @@ export interface QuotaSummary {
 /**
  * Decides who pays for the next response and holds it.
  *
- * Order is free tier first, then bundles — a user should never burn paid quota
- * while free messages are still available.
+ * Free tier first: never burn paid quota while free messages remain.
  */
 @Injectable()
 export class QuotaService {
@@ -57,11 +57,10 @@ export class QuotaService {
   /**
    * Reserves one response, or throws `QuotaExceededError`.
    *
-   * The whole read-check-increment runs in one transaction with row locks, so
-   * two concurrent requests can never both spend the last available response.
-   * The reservation is deliberately taken *before* the slow AI call rather than
-   * after — a request that gets an answer it never paid for is worse than one
-   * that has to be refunded.
+   * Read-check-increment runs in one transaction under row locks, so two
+   * concurrent requests can never both spend the last response. Reserving
+   * before the slow AI call is deliberate: an answer nobody paid for is worse
+   * than one that has to be refunded.
    */
   async reserve(userId: string): Promise<QuotaReservation> {
     const now = this.clock.now();
@@ -75,7 +74,12 @@ export class QuotaService {
 
         const remaining = this.freeAllowance - freeQuota.messagesUsed;
         this.logger.log(`User ${userId} used a free message (${remaining} left this month)`);
-        return { source: QuotaSource.FREE_TIER, subscriptionId: null, remainingAfter: remaining };
+        return {
+          source: QuotaSource.FREE_TIER,
+          subscriptionId: null,
+          periodKey: freeQuota.periodKey,
+          remainingAfter: remaining,
+        };
       }
 
       const reservation = await this.bundles.reserveOne(userId, now, manager);
@@ -83,6 +87,7 @@ export class QuotaService {
         return {
           source: QuotaSource.SUBSCRIPTION,
           subscriptionId: reservation.subscriptionId,
+          periodKey: null,
           remainingAfter: reservation.remainingAfter,
         };
       }
@@ -111,8 +116,24 @@ export class QuotaService {
       }
 
       const freeQuota = await this.freeQuotas.findForUser(userId);
-      if (!freeQuota) return;
-      freeQuota.release();
+      if (!freeQuota) {
+        // The same row was read or created when the message was reserved, so
+        // its absence now is a real anomaly, not a normal no-op.
+        this.logger.error(
+          `Cannot refund a free message to user ${userId}: quota row is missing. ` +
+            'One message was charged for an answer that was never delivered.',
+        );
+        return;
+      }
+
+      if (!freeQuota.release(reservation.periodKey ?? freeQuota.periodKey)) {
+        this.logger.warn(
+          `Skipped refunding user ${userId}: reservation belonged to ${reservation.periodKey}, ` +
+            `counter has since rolled to ${freeQuota.periodKey}`,
+        );
+        return;
+      }
+
       await this.freeQuotas.save(freeQuota);
       this.logger.warn(`Released 1 free message back to user ${userId}`);
     } catch (error) {
@@ -123,7 +144,6 @@ export class QuotaService {
     }
   }
 
-  /** Current allowance across free tier and bundles, for the usage endpoint. */
   async summarise(userId: string): Promise<QuotaSummary> {
     const now = this.clock.now();
     const freeQuota = await this.freeQuotas.findForUser(userId);
@@ -150,7 +170,6 @@ export class QuotaService {
     };
   }
 
-  /** Bulk monthly reset. Driven by the cron job and the ops endpoint. */
   async resetFreeQuotas(): Promise<{ resetAt: Date; rowsReset: number }> {
     const resetAt = this.clock.now();
     const rowsReset = await this.freeQuotas.resetStale(resetAt);
@@ -159,7 +178,7 @@ export class QuotaService {
   }
 }
 
-/** Midnight UTC on the 1st of next month — when the free allowance refills. */
+/** Midnight UTC on the 1st of next month, when the free allowance refills. */
 export function nextResetAt(now: Date): Date {
   return addMonthsUtc(startOfMonthUtc(now), 1);
 }

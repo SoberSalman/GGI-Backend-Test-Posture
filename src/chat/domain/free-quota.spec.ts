@@ -16,7 +16,7 @@ describe('FreeQuota', () => {
     expect(august.remainingIn(AUGUST, ALLOWANCE)).toBe(1);
   });
 
-  it('reads a previous month as zero used — this is the monthly reset', () => {
+  it('reads a previous month as zero used, which is the monthly reset', () => {
     const stale = quota('2026-07', ALLOWANCE);
 
     expect(stale.isStale(AUGUST)).toBe(true);
@@ -50,10 +50,19 @@ describe('FreeQuota', () => {
   it('refunds a message without dropping below zero', () => {
     const august = quota('2026-08', 1);
 
-    august.release();
-    august.release();
+    expect(august.release('2026-08')).toBe(true);
+    expect(august.release('2026-08')).toBe(true);
 
     expect(august.messagesUsed).toBe(0);
+  });
+
+  it('drops a refund for a month that has already rolled over', () => {
+    // Reserved on 31 August, provider failed after the counter rolled into
+    // September: refunding now would credit August's spend to September.
+    const september = quota('2026-09', 2);
+
+    expect(september.release('2026-08')).toBe(false);
+    expect(september.messagesUsed).toBe(2);
   });
 
   it('hands back the full allowance the moment the month turns over', () => {

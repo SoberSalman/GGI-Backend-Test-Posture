@@ -38,7 +38,7 @@ describe('QuotaService', () => {
       describeUsableBundles: jest.fn().mockResolvedValue([]),
     };
 
-    // Run the callback straight through — the transaction itself is exercised
+    // Run the callback straight through, the transaction itself is exercised
     // by the e2e suite against a real database.
     const dataSource = {
       transaction: jest.fn((work: (manager: EntityManager) => Promise<unknown>) =>
@@ -94,6 +94,7 @@ describe('QuotaService', () => {
       expect(reservation).toEqual({
         source: QuotaSource.SUBSCRIPTION,
         subscriptionId: 'sub-1',
+        periodKey: null,
         remainingAfter: 59,
       });
     });
@@ -147,6 +148,7 @@ describe('QuotaService', () => {
       await service.release('user-1', {
         source: QuotaSource.FREE_TIER,
         subscriptionId: null,
+        periodKey: '2026-08',
         remainingAfter: 1,
       });
 
@@ -158,6 +160,7 @@ describe('QuotaService', () => {
       await service.release('user-1', {
         source: QuotaSource.SUBSCRIPTION,
         subscriptionId: 'sub-1',
+        periodKey: null,
         remainingAfter: 5,
       });
 
@@ -165,13 +168,14 @@ describe('QuotaService', () => {
       expect(freeQuotas.save).not.toHaveBeenCalled();
     });
 
-    it('swallows refund failures — the caller is already reporting an error', async () => {
+    it('swallows refund failures, the caller is already reporting an error', async () => {
       bundles.releaseOne.mockRejectedValue(new Error('database unreachable'));
 
       await expect(
         service.release('user-1', {
           source: QuotaSource.SUBSCRIPTION,
           subscriptionId: 'sub-1',
+          periodKey: null,
           remainingAfter: 5,
         }),
       ).resolves.toBeUndefined();

@@ -1,8 +1,13 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Between, Repository } from 'typeorm';
-import { startOfMonthUtc } from '../../shared/time/billing-period';
+import { Repository } from 'typeorm';
+import { addMonthsUtc, startOfMonthUtc } from '../../shared/time/billing-period';
 import { ChatMessage } from '../domain/chat-message.entity';
+
+export interface MonthToDateUsage {
+  messages: number;
+  tokens: number;
+}
 
 export interface HistoryPage {
   items: ChatMessage[];
@@ -32,21 +37,31 @@ export class ChatMessageRepository {
     return { items, total, page, limit };
   }
 
-  /** Total tokens the user has spent in the calendar month containing `now`. */
-  async sumTokensThisMonth(userId: string, now: Date): Promise<number> {
-    const { total } = (await this.messages
+  /**
+   * Message and token totals for the calendar month containing `now`.
+   *
+   * Both figures come from one query over one window. Splitting them across two
+   * queries let the bounds drift apart, the count was capped at `now` while the
+   * token sum ran to the end of time, so the two disagreed about which messages
+   * belonged to "this month".
+   */
+  async monthToDateUsage(userId: string, now: Date): Promise<MonthToDateUsage> {
+    const row = await this.messages
       .createQueryBuilder('message')
-      .select('COALESCE(SUM(message.totalTokens), 0)', 'total')
+      .select('COUNT(*)', 'messages')
+      .addSelect('COALESCE(SUM(message.totalTokens), 0)', 'tokens')
       .where('message.userId = :userId', { userId })
       .andWhere('message.createdAt >= :from', { from: startOfMonthUtc(now) })
-      .getRawOne<{ total: string }>()) ?? { total: '0' };
+      .andWhere('message.createdAt < :to', { to: startOfNextMonthUtc(now) })
+      .getRawOne<{ messages: string; tokens: string }>();
 
-    return Number.parseInt(total, 10);
+    return {
+      messages: Number.parseInt(row?.messages ?? '0', 10),
+      tokens: Number.parseInt(row?.tokens ?? '0', 10),
+    };
   }
+}
 
-  async countInMonth(userId: string, now: Date): Promise<number> {
-    return this.messages.count({
-      where: { userId, createdAt: Between(startOfMonthUtc(now), now) },
-    });
-  }
+function startOfNextMonthUtc(now: Date): Date {
+  return addMonthsUtc(startOfMonthUtc(now), 1);
 }
