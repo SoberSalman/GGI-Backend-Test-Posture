@@ -9,6 +9,7 @@ export interface AppConfig {
   paymentFailureRate: number;
   enableScheduledJobs: boolean;
   adminApiKey: string;
+  allowUnauthenticatedAdmin: boolean;
   exposeSeedUsers: boolean;
   throttle: ThrottleConfig;
 }
@@ -26,6 +27,8 @@ export interface DatabaseConfig {
   database: string;
   logging: boolean;
   poolSize: number;
+  statementTimeoutMs: number;
+  lockTimeoutMs: number;
 }
 
 export interface MockAiConfig {
@@ -35,8 +38,11 @@ export interface MockAiConfig {
   timeoutMs: number;
 }
 
+const ENVIRONMENTS = ['development', 'test', 'staging', 'production'] as const;
+type Environment = (typeof ENVIRONMENTS)[number];
+
 export const configuration = (): AppConfig => ({
-  env: str('NODE_ENV', 'development'),
+  env: environment(),
   port: int('PORT', 3000),
   apiPrefix: str('API_PREFIX', 'api/v1'),
   database: {
@@ -47,6 +53,8 @@ export const configuration = (): AppConfig => ({
     database: str('DB_NAME', 'ggi_assessment'),
     logging: bool('DB_LOGGING', false),
     poolSize: int('DB_POOL_SIZE', 10),
+    statementTimeoutMs: int('DB_STATEMENT_TIMEOUT_MS', 30_000),
+    lockTimeoutMs: int('DB_LOCK_TIMEOUT_MS', 10_000),
   },
   freeMessagesPerMonth: int('FREE_MESSAGES_PER_MONTH', 3),
   mockAi: {
@@ -58,12 +66,36 @@ export const configuration = (): AppConfig => ({
   paymentFailureRate: float('PAYMENT_FAILURE_RATE', 0.2),
   enableScheduledJobs: bool('ENABLE_SCHEDULED_JOBS', true),
   adminApiKey: str('ADMIN_API_KEY', ''),
+  allowUnauthenticatedAdmin: unauthenticatedAdminAllowed(),
   throttle: {
     ttlMs: int('THROTTLE_TTL_MS', 60_000),
     limit: int('THROTTLE_LIMIT', 60),
   },
-  exposeSeedUsers: bool('EXPOSE_SEED_USERS', str('NODE_ENV', 'development') !== 'production'),
+  // Fail closed. Deriving this from NODE_ENV meant a typo or an unset value
+  // silently published every user id, so it must be opted into explicitly.
+  exposeSeedUsers: bool('EXPOSE_SEED_USERS', false),
 });
+
+/**
+ * Validated rather than free text: two security defaults used to hinge on this
+ * matching 'production' exactly, so 'Production' or an unset value opened them.
+ */
+function environment(): Environment {
+  const raw = str('NODE_ENV', 'development');
+  if (!(ENVIRONMENTS as readonly string[]).includes(raw)) {
+    throw new Error(`Invalid NODE_ENV '${raw}'. Expected one of: ${ENVIRONMENTS.join(', ')}`);
+  }
+  return raw as Environment;
+}
+
+/** Never honoured in production, whatever the variable says. */
+function unauthenticatedAdminAllowed(): boolean {
+  const allowed = bool('ALLOW_UNAUTHENTICATED_ADMIN', false);
+  if (allowed && environment() === 'production') {
+    throw new Error('ALLOW_UNAUTHENTICATED_ADMIN cannot be enabled in production.');
+  }
+  return allowed;
+}
 
 function str(key: string, fallback: string): string {
   return process.env[key]?.trim() || fallback;

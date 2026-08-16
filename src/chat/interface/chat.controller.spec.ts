@@ -40,7 +40,7 @@ describe('ChatController', () => {
     chat = {
       ask: jest.fn().mockResolvedValue({
         message: message(),
-        reservation: { source: QuotaSource.FREE_TIER, subscriptionId: null, remainingAfter: 2 },
+        reservation: { source: QuotaSource.FREE_TIER, periodKey: '2026-08', remainingAfter: 2 },
       }),
       history: jest.fn().mockResolvedValue({ items: [message()], total: 25, page: 2, limit: 10 }),
       monthlyUsage: jest.fn().mockResolvedValue({ messages: 4, tokens: 250 }),
@@ -100,7 +100,6 @@ describe('ChatController', () => {
         reservation: {
           source: QuotaSource.SUBSCRIPTION,
           subscriptionId: 'sub-1',
-          periodKey: null,
           remainingAfter: 9,
         },
       });

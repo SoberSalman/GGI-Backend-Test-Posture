@@ -19,6 +19,8 @@ process.env.MOCK_AI_MAX_DELAY_MS = '15';
 process.env.ENABLE_SCHEDULED_JOBS = 'false';
 
 process.env.FREE_MESSAGES_PER_MONTH = '3';
+process.env.EXPOSE_SEED_USERS = 'true';
+process.env.ALLOW_UNAUTHENTICATED_ADMIN = 'true';
 
 // The suite fires far more requests per minute from one address than a real
 // client would; rate limiting is exercised in its own test instead.

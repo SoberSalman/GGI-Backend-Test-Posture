@@ -5,6 +5,7 @@ import { CurrentUserGuard, USER_ID_HEADER } from '../../shared/auth/current-user
 import { Clock } from '../../shared/time/clock';
 import { User } from '../../users/domain/user.entity';
 import { ChatService } from '../application/chat.service';
+import { QuotaSource } from '../domain/chat-message.entity';
 import { QuotaService } from '../application/quota.service';
 import { AskQuestionDto } from './dto/ask-question.dto';
 import { HistoryQueryDto } from './dto/history-query.dto';
@@ -40,7 +41,8 @@ export class ChatController {
       ...toChatMessageView(message),
       quota: {
         chargedTo: reservation.source,
-        subscriptionId: reservation.subscriptionId,
+        subscriptionId:
+          reservation.source === QuotaSource.SUBSCRIPTION ? reservation.subscriptionId : null,
         remainingAfter: reservation.remainingAfter,
       },
     };

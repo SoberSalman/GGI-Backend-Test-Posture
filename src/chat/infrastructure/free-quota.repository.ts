@@ -54,6 +54,29 @@ export class FreeQuotaRepository {
   }
 
   /**
+   * Hands one free message back, atomically.
+   *
+   * The period is part of the WHERE rather than checked in memory: a refund is
+   * only valid against the month it was reserved in, and by the time a slow
+   * provider call fails the counter may already have rolled over. Load, mutate
+   * and full-save would also clobber a concurrent reserve that committed in
+   * between, which is the same lost update the subscription writes avoid.
+   *
+   * @returns whether a row was actually credited.
+   */
+  async refundOne(userId: string, reservedPeriod: string): Promise<boolean> {
+    const result = await this.quotas
+      .createQueryBuilder()
+      .update(FreeQuota)
+      .set({ messagesUsed: () => 'GREATEST("messagesUsed" - 1, 0)' })
+      .where('"userId" = :userId', { userId })
+      .andWhere('"periodKey" = :reservedPeriod', { reservedPeriod })
+      .execute();
+
+    return (result.affected ?? 0) > 0;
+  }
+
+  /**
    * Rolls every counter left over from a previous month back to zero.
    *
    * @returns how many rows were reset.

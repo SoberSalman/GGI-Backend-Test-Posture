@@ -1,16 +1,9 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { EntityManager, Repository } from 'typeorm';
-import { Payment, PaymentKind, PaymentStatus } from '../domain/payment.entity';
+import { Payment } from '../domain/payment.entity';
 
-export interface NewPayment {
-  subscriptionId: string;
-  userId: string;
-  kind: PaymentKind;
-  status: PaymentStatus;
-  amountCents: number;
-  failureReason?: string | null;
-}
+export type NewPayment = Omit<Payment, 'id' | 'createdAt' | 'subscription'>;
 
 @Injectable()
 export class PaymentRepository {
@@ -25,9 +18,7 @@ export class PaymentRepository {
    */
   async record(entry: NewPayment, manager?: EntityManager): Promise<Payment> {
     const repository = manager ? manager.getRepository(Payment) : this.payments;
-    return repository.save(
-      repository.create({ failureReason: entry.failureReason ?? null, ...entry }),
-    );
+    return repository.save(repository.create(entry));
   }
 
   async findForSubscription(subscriptionId: string): Promise<Payment[]> {

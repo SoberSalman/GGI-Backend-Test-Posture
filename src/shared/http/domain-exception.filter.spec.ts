@@ -4,21 +4,14 @@ import { DomainError } from '../domain/domain-error';
 import { UnauthenticatedError } from '../domain/errors';
 import { DomainExceptionFilter } from './domain-exception.filter';
 
-class TestConflictError extends DomainError {
-  readonly code = 'BUSINESS_RULE_VIOLATION';
-  readonly status = 409;
-
-  constructor() {
-    super('Nope.');
-  }
-}
-
-class TestQuotaError extends DomainError {
-  readonly code = 'QUOTA_EXCEEDED';
-  readonly status = 402;
-
-  constructor() {
-    super('Out of quota.', { remaining: 0 });
+class TestError extends DomainError {
+  constructor(
+    readonly code: string,
+    readonly status: number,
+    message: string,
+    details?: Record<string, unknown>,
+  ) {
+    super(message, details);
   }
 }
 
@@ -48,7 +41,7 @@ describe('DomainExceptionFilter', () => {
   it('maps a domain error to its own status, code and details', () => {
     const { host, status, json } = hostFor();
 
-    filter.catch(new TestQuotaError(), host);
+    filter.catch(new TestError('QUOTA_EXCEEDED', 402, 'Out of quota.', { remaining: 0 }), host);
 
     expect(status).toHaveBeenCalledWith(402);
     expect(json).toHaveBeenCalledWith(
@@ -113,7 +106,7 @@ describe('DomainExceptionFilter', () => {
   it('handles a business rule violation as a 409', () => {
     const { host, status } = hostFor();
 
-    filter.catch(new TestConflictError(), host);
+    filter.catch(new TestError('BUSINESS_RULE_VIOLATION', 409, 'Nope.'), host);
 
     expect(status).toHaveBeenCalledWith(409);
   });

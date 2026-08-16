@@ -4,6 +4,9 @@ import { Repository } from 'typeorm';
 import { startOfMonthUtc, startOfNextMonthUtc } from '../../shared/time/billing-period';
 import { ChatMessage } from '../domain/chat-message.entity';
 
+/** Every column a stored exchange must carry, so a missing one fails to compile. */
+export type NewChatMessage = Omit<ChatMessage, 'id' | 'createdAt' | 'user'>;
+
 export interface MonthToDateUsage {
   messages: number;
   tokens: number;
@@ -23,7 +26,7 @@ export class ChatMessageRepository {
     private readonly messages: Repository<ChatMessage>,
   ) {}
 
-  async save(message: Partial<ChatMessage>): Promise<ChatMessage> {
+  async save(message: NewChatMessage): Promise<ChatMessage> {
     return this.messages.save(this.messages.create(message));
   }
 

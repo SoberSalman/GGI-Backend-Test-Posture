@@ -37,6 +37,19 @@ async function bootstrap(): Promise<void> {
   app.useGlobalFilters(new DomainExceptionFilter());
   app.enableShutdownHooks();
 
+  // Publishes every route, DTO and header name, including the admin ones.
+  if (config.get<string>('env') !== 'production') {
+    mountSwagger(app, apiPrefix);
+  }
+
+  await app.listen(port);
+
+  const logger = new Logger('Bootstrap');
+  logger.log(`API listening on http://localhost:${port}/${apiPrefix}`);
+  logger.log(`Swagger UI at http://localhost:${port}/${apiPrefix}/docs`);
+}
+
+function mountSwagger(app: NestExpressApplication, apiPrefix: string): void {
   SwaggerModule.setup(
     `${apiPrefix}/docs`,
     app,
@@ -53,12 +66,6 @@ async function bootstrap(): Promise<void> {
         .build(),
     ),
   );
-
-  await app.listen(port);
-
-  const logger = new Logger('Bootstrap');
-  logger.log(`API listening on http://localhost:${port}/${apiPrefix}`);
-  logger.log(`Swagger UI at http://localhost:${port}/${apiPrefix}/docs`);
 }
 
 bootstrap().catch((error: unknown) => {

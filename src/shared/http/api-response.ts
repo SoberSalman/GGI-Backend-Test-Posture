@@ -1,10 +1,13 @@
-/** Envelope every endpoint returns, success or failure. */
-export interface ApiResponse<T> {
-  success: boolean;
-  data: T | null;
-  error: ApiError | null;
-  meta: ApiMeta;
-}
+/**
+ * Envelope every endpoint returns.
+ *
+ * A union so the pairing is enforced rather than conventional: a shape with
+ * `success: boolean` and two independently nullable fields also permits
+ * `{ success: true, error: {...} }`.
+ */
+export type ApiResponse<T> =
+  | { success: true; data: T; error: null; meta: ApiMeta }
+  | { success: false; data: null; error: ApiError; meta: ApiMeta };
 
 export interface ApiError {
   /** Clients branch on this, not on `message`. */

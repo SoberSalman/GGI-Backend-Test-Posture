@@ -103,8 +103,10 @@ export class SubscriptionRepository {
   /**
    * Claims the bundles due for renewal `FOR UPDATE SKIP LOCKED`.
    *
-   * `SKIP LOCKED` means two overlapping billing runs (the nightly cron racing a
-   * manual trigger) claim disjoint sets instead of both charging the same card.
+   * `SKIP LOCKED` only settles the race between two runs issuing this query at
+   * the same instant. It is not what prevents double charging: this transaction
+   * commits as soon as the rows are read, so a later run sees them again. The
+   * actual guarantee is the lock and dueness re-check in `renewOne`.
    */
   async claimDueForRenewal(now: Date, manager: EntityManager): Promise<Subscription[]> {
     return manager
@@ -120,7 +122,7 @@ export class SubscriptionRepository {
       .getMany();
   }
 
-  /** Rolls the period forward. Leaves `messagesUsed` to `resetUsage`. */
+  /** Rolls the period forward and starts the new period's usage at zero. */
   async applyRenewal(id: string, update: RenewalUpdate, manager: EntityManager): Promise<void> {
     await manager
       .getRepository(Subscription)
@@ -198,15 +200,12 @@ export class SubscriptionRepository {
   }
 }
 
+/** Getters and methods on the entity; not columns anyone can supply. */
+type Computed =
+  'remainingMessages' | 'isUnlimited' | 'isWithinPeriod' | 'canServe' | 'isDueForRenewal';
+
+/** Every column a new bundle must carry, so a missing one fails to compile. */
 export type NewSubscription = Omit<
   Subscription,
-  | 'id'
-  | 'createdAt'
-  | 'updatedAt'
-  | 'user'
-  | 'remainingMessages'
-  | 'isUnlimited'
-  | 'isWithinPeriod'
-  | 'canServe'
-  | 'isDueForRenewal'
+  'id' | 'createdAt' | 'updatedAt' | 'user' | Computed
 >;

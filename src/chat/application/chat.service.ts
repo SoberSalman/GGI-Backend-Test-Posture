@@ -1,5 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { ChatMessage } from '../domain/chat-message.entity';
+import { ChatMessage, QuotaSource } from '../domain/chat-message.entity';
 import { AiProviderError } from '../domain/chat.errors';
 import {
   ChatMessageRepository,
@@ -62,7 +62,8 @@ export class ChatService {
       completionTokens: completion.usage.completionTokens,
       totalTokens: completion.usage.totalTokens,
       quotaSource: reservation.source,
-      subscriptionId: reservation.subscriptionId,
+      subscriptionId:
+        reservation.source === QuotaSource.SUBSCRIPTION ? reservation.subscriptionId : null,
       latencyMs: completion.latencyMs,
     });
 

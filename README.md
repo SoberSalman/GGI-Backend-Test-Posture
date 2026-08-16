@@ -443,17 +443,17 @@ wait, see `test/subscriptions.e2e-spec.ts`.
 ## Testing
 
 ```bash
-npm test            # 148 unit tests
+npm test            # 156 unit tests
 npm run test:cov    # with coverage
-npm run test:e2e    # 38 end-to-end tests against a real Postgres
+npm run test:e2e    # 42 end-to-end tests against a real Postgres
 ```
 
 | Suite | Count | Scope |
 |-------|-------|-------|
-| Unit | 148 | Domain policies, entities, application services, guards, filters, presenters, schedulers, config, all with mocked I/O |
-| E2E | 38 | The real app over HTTP against a real database: the full request path through guards, pipes, transactions and repositories |
+| Unit | 156 | Domain policies, entities, application services, guards, filters, presenters, schedulers, config, all with mocked I/O |
+| E2E | 42 | The real app over HTTP against a real database: the full request path through guards, pipes, transactions and repositories |
 
-**Coverage: 90.2% statements, 86.3% branches, 90.2% lines** (threshold 80%).
+**Coverage: 93.4% statements, 91.6% branches, 93.6% lines** (threshold 80%).
 
 Repositories are excluded from unit coverage, they are thin TypeORM query wrappers whose
 behaviour (row locks, `ON CONFLICT`, pagination) is only meaningful against a real
@@ -477,6 +477,9 @@ Notable cases covered:
 - 20 concurrent requests against 13 available responses, exactly 13 served
 - a refund arriving after the month rolled over, which must not be credited
   against the new month's allowance
+- a provider failure refunding a bundle response against a real database, and
+  the floor that stops an unmatched refund driving usage negative
+- two concurrent billing runs charging one due bundle exactly once
 - renewal dueness at the exact boundary instant, not a second past it
 - month-boundary date arithmetic (Jan 31 + 1 month = Feb 28; leap years)
 
@@ -497,10 +500,17 @@ Everything is environment-driven; see `.env.example`.
 | `MOCK_AI_MODEL` | `gpt-4o-mini` | Model name reported on stored messages |
 | `AI_TIMEOUT_MS` | `15000` | Ceiling on a completion, so a hung provider cannot strand reserved quota |
 | `PAYMENT_FAILURE_RATE` | `0.2` | Probability a simulated renewal charge declines |
-| `ADMIN_API_KEY` | _(unset)_ | Required by the two cross-tenant endpoints. Unset leaves them open outside production and refused in production. |
-| `EXPOSE_SEED_USERS` | non-prod | Whether `GET /users` is mounted |
+| `ADMIN_API_KEY` | _(unset)_ | Required by the two cross-tenant endpoints |
+| `ALLOW_UNAUTHENTICATED_ADMIN` | `false` | Opens them with no key. Refused outright in production |
+| `EXPOSE_SEED_USERS` | `false` | Whether `GET /users` is mounted |
+| `DB_STATEMENT_TIMEOUT_MS` / `DB_LOCK_TIMEOUT_MS` | `30000` / `10000` | Caps a statement and a lock wait, so a stalled provider cannot pin a row |
 | `THROTTLE_TTL_MS` / `THROTTLE_LIMIT` | `60000` / `60` | Rate-limit window and burst |
 | `ENABLE_SCHEDULED_JOBS` | `true` | Turn cron off and drive billing purely via the endpoints |
+
+`NODE_ENV` is validated against a fixed set at boot. Both security defaults used
+to derive from it matching `'production'` exactly, which meant an unset or
+misspelled value silently opened them, so they now fail closed and must be
+opted into explicitly.
 
 Config is parsed and **validated at boot**, a non-numeric `PORT` or a
 `PAYMENT_FAILURE_RATE` outside `0..1` fails fast with a clear message rather than
@@ -548,9 +558,14 @@ Points where the brief left room to interpret, and the call made:
 
 ### Known limits
 
-- **Renewal holds a row lock across the gateway call.** Fine against a simulated
-  gateway; a real PSP needs an idempotency key and an outbox so the lock can be
-  released before the network call.
+- **Renewal holds a row lock across the gateway call.** Bounded by
+  `DB_LOCK_TIMEOUT_MS` / `DB_STATEMENT_TIMEOUT_MS` so a stalled provider cannot
+  pin a row forever, but a real PSP still needs an idempotency key and an outbox:
+  a crash between the charge returning and the commit rolls the payment row back
+  and the next run charges again.
+- **The tightening migration is written for an empty database.** Constraints are
+  added without `NOT VALID` and indexes without `CONCURRENTLY`, so against a
+  populated table it would hold `ACCESS EXCLUSIVE` locks for the whole run.
 - **The cron is single-process.** Two instances would both fire, though the
   `SKIP LOCKED` claim and the dueness re-check inside the transaction mean that
   is safe rather than a double charge. A job queue is still the right answer at

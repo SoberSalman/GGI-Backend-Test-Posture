@@ -29,6 +29,7 @@ describe('QuotaService', () => {
       findForUser: jest.fn().mockResolvedValue(storedQuota),
       findOrCreateLocked: jest.fn().mockResolvedValue(storedQuota),
       save: jest.fn().mockImplementation((quota: FreeQuota) => Promise.resolve(quota)),
+      refundOne: jest.fn().mockResolvedValue(true),
       resetStale: jest.fn().mockResolvedValue(7),
     } as unknown as jest.Mocked<FreeQuotaRepository>;
 
@@ -67,9 +68,11 @@ describe('QuotaService', () => {
     it('charges the free tier first and never touches a bundle', async () => {
       const reservation = await service.reserve('user-1');
 
-      expect(reservation.source).toBe(QuotaSource.FREE_TIER);
-      expect(reservation.subscriptionId).toBeNull();
-      expect(reservation.remainingAfter).toBe(FREE_ALLOWANCE - 1);
+      expect(reservation).toEqual({
+        source: QuotaSource.FREE_TIER,
+        periodKey: '2026-08',
+        remainingAfter: FREE_ALLOWANCE - 1,
+      });
       expect(bundles.reserveOne).not.toHaveBeenCalled();
     });
 
@@ -94,7 +97,6 @@ describe('QuotaService', () => {
       expect(reservation).toEqual({
         source: QuotaSource.SUBSCRIPTION,
         subscriptionId: 'sub-1',
-        periodKey: null,
         remainingAfter: 59,
       });
     });
@@ -142,25 +144,35 @@ describe('QuotaService', () => {
   });
 
   describe('release', () => {
-    it('hands a free message back', async () => {
-      storedQuota.messagesUsed = 2;
-
+    it('hands a free message back against the month it came from', async () => {
       await service.release('user-1', {
         source: QuotaSource.FREE_TIER,
-        subscriptionId: null,
         periodKey: '2026-08',
         remainingAfter: 1,
       });
 
-      expect(storedQuota.messagesUsed).toBe(1);
-      expect(freeQuotas.save).toHaveBeenCalled();
+      // One conditional UPDATE, not load-mutate-save: a concurrent reserve
+      // must not be clobbered by a stale snapshot.
+      expect(freeQuotas.refundOne).toHaveBeenCalledWith('user-1', '2026-08');
+      expect(freeQuotas.save).not.toHaveBeenCalled();
+    });
+
+    it('logs rather than inventing a refund when the month has rolled over', async () => {
+      freeQuotas.refundOne.mockResolvedValue(false);
+
+      await service.release('user-1', {
+        source: QuotaSource.FREE_TIER,
+        periodKey: '2026-07',
+        remainingAfter: 1,
+      });
+
+      expect(freeQuotas.refundOne).toHaveBeenCalledWith('user-1', '2026-07');
     });
 
     it('hands a bundle response back to its bundle', async () => {
       await service.release('user-1', {
         source: QuotaSource.SUBSCRIPTION,
         subscriptionId: 'sub-1',
-        periodKey: null,
         remainingAfter: 5,
       });
 
@@ -175,7 +187,6 @@ describe('QuotaService', () => {
         service.release('user-1', {
           source: QuotaSource.SUBSCRIPTION,
           subscriptionId: 'sub-1',
-          periodKey: null,
           remainingAfter: 5,
         }),
       ).resolves.toBeUndefined();

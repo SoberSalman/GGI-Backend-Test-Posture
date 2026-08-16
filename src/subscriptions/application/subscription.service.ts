@@ -64,6 +64,7 @@ export class SubscriptionService {
       kind: PaymentKind.INITIAL,
       status: PaymentStatus.SUCCEEDED,
       amountCents: subscription.priceCents,
+      failureReason: null,
     });
 
     this.logger.log(

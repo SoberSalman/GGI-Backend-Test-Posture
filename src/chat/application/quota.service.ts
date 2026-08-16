@@ -11,15 +11,26 @@ import { QuotaSource } from '../domain/chat-message.entity';
 import { QuotaExceededError } from '../domain/chat.errors';
 import { FreeQuotaRepository } from '../infrastructure/free-quota.repository';
 
-export interface QuotaReservation {
-  source: QuotaSource;
-  /** Set only when the response came out of a bundle. */
-  subscriptionId: string | null;
-  /** Month the free message was taken from, so a late refund can't cross into the next one. */
-  periodKey: string | null;
-  /** Responses left in whatever allowance was charged. `null` for unlimited. */
-  remainingAfter: number | null;
-}
+/**
+ * A response held for the caller, pending a successful AI call.
+ *
+ * A union rather than one shape with nullable fields: which identifier applies
+ * depends on which allowance paid, and the refund path needs exactly one of
+ * them. Optional fields would leave every consumer to remember that.
+ */
+export type QuotaReservation =
+  | {
+      source: QuotaSource.FREE_TIER;
+      /** Month it came from, so a late refund cannot cross into the next one. */
+      periodKey: string;
+      remainingAfter: number;
+    }
+  | {
+      source: QuotaSource.SUBSCRIPTION;
+      subscriptionId: string;
+      /** `null` for unlimited tiers. */
+      remainingAfter: number | null;
+    };
 
 export interface QuotaSummary {
   free: {
@@ -76,7 +87,6 @@ export class QuotaService {
         this.logger.log(`User ${userId} used a free message (${remaining} left this month)`);
         return {
           source: QuotaSource.FREE_TIER,
-          subscriptionId: null,
           periodKey: freeQuota.periodKey,
           remainingAfter: remaining,
         };
@@ -87,7 +97,6 @@ export class QuotaService {
         return {
           source: QuotaSource.SUBSCRIPTION,
           subscriptionId: reservation.subscriptionId,
-          periodKey: null,
           remainingAfter: reservation.remainingAfter,
         };
       }
@@ -110,32 +119,22 @@ export class QuotaService {
    */
   async release(userId: string, reservation: QuotaReservation): Promise<void> {
     try {
-      if (reservation.source === QuotaSource.SUBSCRIPTION && reservation.subscriptionId) {
+      if (reservation.source === QuotaSource.SUBSCRIPTION) {
         await this.bundles.releaseOne(reservation.subscriptionId);
         return;
       }
 
-      const freeQuota = await this.freeQuotas.findForUser(userId);
-      if (!freeQuota) {
-        // The same row was read or created when the message was reserved, so
-        // its absence now is a real anomaly, not a normal no-op.
-        this.logger.error(
-          `Cannot refund a free message to user ${userId}: quota row is missing. ` +
-            'One message was charged for an answer that was never delivered.',
-        );
+      if (await this.freeQuotas.refundOne(userId, reservation.periodKey)) {
+        this.logger.warn(`Released 1 free message back to user ${userId}`);
         return;
       }
 
-      if (!freeQuota.release(reservation.periodKey ?? freeQuota.periodKey)) {
-        this.logger.warn(
-          `Skipped refunding user ${userId}: reservation belonged to ${reservation.periodKey}, ` +
-            `counter has since rolled to ${freeQuota.periodKey}`,
-        );
-        return;
-      }
-
-      await this.freeQuotas.save(freeQuota);
-      this.logger.warn(`Released 1 free message back to user ${userId}`);
+      // Either the counter rolled into a new month, so the allowance this
+      // message came out of no longer exists, or the row is gone, which should
+      // be impossible because reserve created it.
+      this.logger.warn(
+        `No free message refunded to user ${userId}: no counter for ${reservation.periodKey}`,
+      );
     } catch (error) {
       this.logger.error(
         `Failed to release reserved quota for user ${userId}`,

@@ -6,6 +6,7 @@ import {
   SubscriptionStatus,
 } from '../src/subscriptions/domain/bundle-tier';
 import { User } from '../src/users/domain/user.entity';
+import { SubscriptionRepository } from '../src/subscriptions/infrastructure/subscription.repository';
 import { E2EContext, E2E_START, createE2EContext } from './helpers/e2e-app';
 
 const API = '/api/v1';
@@ -353,8 +354,9 @@ describe('Subscription module (e2e)', () => {
       const report = await runBilling(user);
 
       expect(outcomeFor(report, bundle.body.data.id)).toBeUndefined();
-      expect(report.body.data.expired).toBeGreaterThan(0);
 
+      // Asserted on this bundle, not on the run total: the billing run sweeps
+      // every row in a database the suite never truncates.
       const after = await request(server)
         .get(`${API}/subscriptions/${bundle.body.data.id}`)
         .set('x-user-id', user.id);
@@ -374,6 +376,62 @@ describe('Subscription module (e2e)', () => {
     });
   });
 
+  describe('refunds against a real database', () => {
+    it('gives the response back to the bundle when the provider fails', async () => {
+      const user = await ctx.createUser('BundleRefund');
+      const bundle = await buy(user, BundleTier.BASIC, BillingCycle.MONTHLY);
+      for (let i = 0; i < 3; i += 1) await askOnce(user);
+
+      await askOnce(user);
+      const spent = await request(server)
+        .get(`${API}/subscriptions/${bundle.body.data.id}`)
+        .set('x-user-id', user.id);
+      expect(spent.body.data.messagesUsed).toBe(1);
+
+      ctx.ai.failNext();
+      const failed = await askOnce(user);
+      ctx.ai.succeed();
+
+      expect(failed.status).toBe(502);
+      const after = await request(server)
+        .get(`${API}/subscriptions/${bundle.body.data.id}`)
+        .set('x-user-id', user.id);
+      expect(after.body.data.messagesUsed).toBe(1);
+    });
+
+    it('floors usage at zero when a refund is not matched by a spend', async () => {
+      // Driven through the repository, not HTTP: every request pairs one
+      // reservation with at most one refund, so the floor is unreachable from
+      // the API and an unguarded "messagesUsed - 1" would go negative only
+      // here. Left in because a retry or a redelivered job would reach it.
+      const user = await ctx.createUser('RefundFloor');
+      const bundle = await buy(user, BundleTier.BASIC, BillingCycle.MONTHLY);
+      const id = bundle.body.data.id as string;
+
+      const subscriptions = ctx.moduleRef.get(SubscriptionRepository);
+      await subscriptions.decrementUsage(id);
+      await subscriptions.decrementUsage(id);
+
+      const after = await request(server)
+        .get(`${API}/subscriptions/${id}`)
+        .set('x-user-id', user.id);
+      expect(after.body.data.messagesUsed).toBe(0);
+    });
+
+    it('gives a free message back without touching the next month', async () => {
+      const user = await ctx.createUser('FreeRefund');
+
+      ctx.ai.failNext();
+      const failed = await askOnce(user);
+      ctx.ai.succeed();
+      expect(failed.status).toBe(502);
+
+      const usage = await request(server).get(`${API}/chat/usage`).set('x-user-id', user.id);
+      expect(usage.body.data.free.used).toBe(0);
+      expect(usage.body.data.free.remaining).toBe(3);
+    });
+  });
+
   describe('concurrency', () => {
     it('never lets parallel requests overspend the last response', async () => {
       const user = await ctx.createUser('Racer');
@@ -387,6 +445,30 @@ describe('Subscription module (e2e)', () => {
 
       expect(served).toBe(13);
       expect(refused).toBe(7);
+    });
+  });
+
+  describe('overlapping billing runs', () => {
+    it('charges a due bundle exactly once across two concurrent runs', async () => {
+      const user = await ctx.createUser('DoubleBilling');
+      const bundle = await buy(user, BundleTier.BASIC, BillingCycle.MONTHLY);
+
+      ctx.clock.setTo(new Date('2026-09-16T12:00:01Z'));
+      const [first, second] = await Promise.all([runBilling(user), runBilling(user)]);
+
+      const renewals = [first, second]
+        .flatMap((report) => report.body.data.outcomes as RenewalOutcomeView[])
+        .filter((outcome) => outcome.subscriptionId === bundle.body.data.id)
+        .filter((outcome) => outcome.result === 'RENEWED');
+      expect(renewals).toHaveLength(1);
+
+      const payments = await request(server)
+        .get(`${API}/subscriptions/${bundle.body.data.id}/payments`)
+        .set('x-user-id', user.id);
+      const renewalCharges = (payments.body.data as { kind: string }[]).filter(
+        (payment) => payment.kind === 'RENEWAL',
+      );
+      expect(renewalCharges).toHaveLength(1);
     });
   });
 

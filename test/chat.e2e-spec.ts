@@ -272,9 +272,11 @@ describe('Chat module (e2e)', () => {
         .set('x-user-id', user.id);
 
       expect(reset.status).toBe(200);
-      expect(reset.body.data.rowsReset).toBeGreaterThan(0);
 
+      // This user's counter specifically, not the run total: the reset sweeps
+      // every row in a database the suite never truncates.
       const usage = await request(server).get(`${API}/chat/usage`).set('x-user-id', user.id);
+      expect(usage.body.data.free.used).toBe(0);
       expect(usage.body.data.free.remaining).toBe(FREE_ALLOWANCE);
     });
   });

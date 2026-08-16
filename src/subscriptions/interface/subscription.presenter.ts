@@ -49,7 +49,7 @@ export function toSubscriptionView(subscription: Subscription): SubscriptionView
   };
 }
 
-export function toPaymentView(payment: Payment) {
+export function toPaymentView(payment: Payment): PaymentView {
   return {
     id: payment.id,
     subscriptionId: payment.subscriptionId,
@@ -60,6 +60,17 @@ export function toPaymentView(payment: Payment) {
     failureReason: payment.failureReason,
     createdAt: payment.createdAt.toISOString(),
   };
+}
+
+export interface PaymentView {
+  id: string;
+  subscriptionId: string;
+  kind: string;
+  status: string;
+  amount: string;
+  amountCents: number;
+  failureReason: string | null;
+  createdAt: string;
 }
 
 export function formatCents(cents: number): string {

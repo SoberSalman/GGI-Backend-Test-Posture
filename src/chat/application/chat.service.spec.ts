@@ -7,7 +7,6 @@ import { QuotaReservation, QuotaService } from './quota.service';
 
 const FREE_RESERVATION: QuotaReservation = {
   source: QuotaSource.FREE_TIER,
-  subscriptionId: null,
   periodKey: '2026-08',
   remainingAfter: 2,
 };
@@ -100,7 +99,6 @@ describe('ChatService', () => {
     quota.reserve.mockResolvedValue({
       source: QuotaSource.SUBSCRIPTION,
       subscriptionId: 'sub-1',
-      periodKey: null,
       remainingAfter: 9,
     });
 

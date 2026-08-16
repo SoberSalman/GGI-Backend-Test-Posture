@@ -22,6 +22,7 @@ export interface BillingRunReport {
   processed: number;
   renewed: number;
   failed: number;
+  skipped: number;
   errored: number;
   expired: number;
   outcomes: RenewalOutcome[];
@@ -51,6 +52,8 @@ export class BillingService {
 
     this.logger.log(`Billing run at ${runAt.toISOString()}: ${due.length} subscription(s) due`);
 
+    // Serial on purpose: these charges hit one payment provider, and the
+    // connection pool is the ceiling on concurrent transactions.
     const outcomes: RenewalOutcome[] = [];
     for (const subscription of due) {
       // One bad row must not abort the batch or skip the expiry sweep below.
@@ -78,6 +81,7 @@ export class BillingService {
       processed: outcomes.length,
       renewed: countBy(outcomes, 'RENEWED'),
       failed: countBy(outcomes, 'PAYMENT_FAILED'),
+      skipped: countBy(outcomes, 'SKIPPED'),
       errored: countBy(outcomes, 'ERROR'),
       expired,
       outcomes,
@@ -93,9 +97,12 @@ export class BillingService {
    * advance in one transaction closes the other half of that hole, where a
    * crash between the two left the bundle due with the money already taken.
    *
-   * ponytail: the charge happens inside the transaction, so a row lock is held
-   * across the provider call. Fine for a simulated gateway; a real PSP needs an
-   * idempotency key and an outbox so the lock can be released first.
+   * Note what this does and does not buy. It makes the local writes atomic, so
+   * a crash can no longer leave the period unadvanced with a payment recorded.
+   * It does NOT make the charge itself safe to repeat: a crash after the
+   * gateway returns but before the commit rolls back the payment row, and the
+   * next run charges again. A real PSP needs an idempotency key for that, and
+   * an outbox so the row lock is released before the network call.
    */
   private async renewOne(subscriptionId: string, runAt: Date): Promise<RenewalOutcome> {
     return this.dataSource.transaction(async (manager) => {

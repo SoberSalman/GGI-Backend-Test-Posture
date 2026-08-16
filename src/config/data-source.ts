@@ -23,6 +23,13 @@ export function buildDataSourceOptions(): DataSourceOptions {
     // Each chat request holds a connection for the length of its quota
     // transaction, so the pool is the real ceiling on concurrent requests.
     poolSize: database.poolSize,
+    // The renewal transaction holds a row lock across the payment call, and a
+    // chat request for the same user waits behind it. Without these a stalled
+    // provider blocks that user indefinitely and never returns the connection.
+    extra: {
+      statement_timeout: database.statementTimeoutMs,
+      lock_timeout: database.lockTimeoutMs,
+    },
     entities: [`${__dirname}/../**/domain/*.entity.{ts,js}`],
     migrations: [`${__dirname}/../migrations/*.{ts,js}`],
     migrationsTableName: 'typeorm_migrations',
