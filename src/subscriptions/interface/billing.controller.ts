@@ -1,6 +1,6 @@
 import { Controller, HttpCode, Post, UseGuards } from '@nestjs/common';
 import { ApiHeader, ApiOperation, ApiTags } from '@nestjs/swagger';
-import { CurrentUserGuard, USER_ID_HEADER } from '../../shared/auth/current-user.guard';
+import { ADMIN_KEY_HEADER, AdminGuard } from '../../shared/auth/admin.guard';
 import { BillingService } from '../application/billing.service';
 
 /**
@@ -10,9 +10,9 @@ import { BillingService } from '../application/billing.service';
  * can watch renewals and random payment failures without waiting for it.
  */
 @ApiTags('billing')
-@ApiHeader({ name: USER_ID_HEADER, description: 'Id of the calling user', required: true })
+@ApiHeader({ name: ADMIN_KEY_HEADER, description: 'Administrative key', required: false })
 @Controller('billing')
-@UseGuards(CurrentUserGuard)
+@UseGuards(AdminGuard)
 export class BillingController {
   constructor(private readonly billing: BillingService) {}
 

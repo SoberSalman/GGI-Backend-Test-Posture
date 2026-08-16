@@ -1,19 +1,20 @@
 import { Controller, HttpCode, Post, UseGuards } from '@nestjs/common';
 import { ApiHeader, ApiOperation, ApiTags } from '@nestjs/swagger';
-import { CurrentUserGuard, USER_ID_HEADER } from '../../shared/auth/current-user.guard';
+import { ADMIN_KEY_HEADER, AdminGuard } from '../../shared/auth/admin.guard';
 import { QuotaService } from '../application/quota.service';
 
 /**
  * Operational trigger for the monthly free-quota reset.
  *
  * The reset also happens on a cron at 00:05 UTC on the 1st, and reads are
- * period-aware regardless — this endpoint just makes the job observable without
- * waiting for a month boundary.
+ * period-aware regardless, so this endpoint just makes the job observable
+ * without waiting for a month boundary. It rewrites every user's counter, so it
+ * is admin-gated.
  */
 @ApiTags('billing')
-@ApiHeader({ name: USER_ID_HEADER, description: 'Id of the calling user', required: true })
+@ApiHeader({ name: ADMIN_KEY_HEADER, description: 'Administrative key', required: false })
 @Controller('billing')
-@UseGuards(CurrentUserGuard)
+@UseGuards(AdminGuard)
 export class FreeQuotaController {
   constructor(private readonly quota: QuotaService) {}
 

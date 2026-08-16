@@ -1,7 +1,9 @@
 import 'reflect-metadata';
 import { Logger, ValidationPipe } from '@nestjs/common';
+import helmet from 'helmet';
 import { ConfigService } from '@nestjs/config';
 import { NestFactory } from '@nestjs/core';
+import { NestExpressApplication } from '@nestjs/platform-express';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { AppModule } from './app.module';
 import { USER_ID_HEADER } from './shared/auth/current-user.guard';
@@ -9,18 +11,23 @@ import { DomainExceptionFilter } from './shared/http/domain-exception.filter';
 import { ResponseEnvelopeInterceptor } from './shared/http/response.interceptor';
 
 async function bootstrap(): Promise<void> {
-  const app = await NestFactory.create(AppModule, { bufferLogs: false });
+  const app = await NestFactory.create<NestExpressApplication>(AppModule, { bufferLogs: false });
   const config = app.get(ConfigService);
 
   const apiPrefix = config.get<string>('apiPrefix', 'api/v1');
   const port = config.get<number>('port', 3000);
 
   app.setGlobalPrefix(apiPrefix);
+  app.use(helmet());
+
+  // Declared rather than left to the Express default, so the ceiling on a
+  // request body is visible next to the DTO limits that assume it.
+  app.useBodyParser('json', { limit: '128kb' });
 
   app.useGlobalPipes(
     new ValidationPipe({
-      whitelist: true, // strip properties the DTO does not declare
-      forbidNonWhitelisted: true, // ...and reject the request that sent them
+      whitelist: true,
+      forbidNonWhitelisted: true,
       transform: true,
       transformOptions: { enableImplicitConversion: false },
     }),
@@ -54,4 +61,13 @@ async function bootstrap(): Promise<void> {
   logger.log(`Swagger UI at http://localhost:${port}/${apiPrefix}/docs`);
 }
 
-void bootstrap();
+bootstrap().catch((error: unknown) => {
+  // `void bootstrap()` satisfies the lint rule but attaches no handler, so a
+  // failed DB connection or a taken port dies as a bare unhandled rejection
+  // with nothing in the application's own log.
+  new Logger('Bootstrap').error(
+    'Failed to start',
+    error instanceof Error ? error.stack : String(error),
+  );
+  process.exit(1);
+});

@@ -8,6 +8,14 @@ export interface AppConfig {
   mockAi: MockAiConfig;
   paymentFailureRate: number;
   enableScheduledJobs: boolean;
+  adminApiKey: string;
+  exposeSeedUsers: boolean;
+  throttle: ThrottleConfig;
+}
+
+export interface ThrottleConfig {
+  ttlMs: number;
+  limit: number;
 }
 
 export interface DatabaseConfig {
@@ -17,12 +25,14 @@ export interface DatabaseConfig {
   password: string;
   database: string;
   logging: boolean;
+  poolSize: number;
 }
 
 export interface MockAiConfig {
   minDelayMs: number;
   maxDelayMs: number;
   model: string;
+  timeoutMs: number;
 }
 
 export const configuration = (): AppConfig => ({
@@ -36,15 +46,23 @@ export const configuration = (): AppConfig => ({
     password: str('DB_PASSWORD', 'ggi_password'),
     database: str('DB_NAME', 'ggi_assessment'),
     logging: bool('DB_LOGGING', false),
+    poolSize: int('DB_POOL_SIZE', 10),
   },
   freeMessagesPerMonth: int('FREE_MESSAGES_PER_MONTH', 3),
   mockAi: {
     minDelayMs: int('MOCK_AI_MIN_DELAY_MS', 300),
     maxDelayMs: int('MOCK_AI_MAX_DELAY_MS', 1200),
     model: str('MOCK_AI_MODEL', 'gpt-4o-mini'),
+    timeoutMs: int('AI_TIMEOUT_MS', 15_000),
   },
   paymentFailureRate: float('PAYMENT_FAILURE_RATE', 0.2),
   enableScheduledJobs: bool('ENABLE_SCHEDULED_JOBS', true),
+  adminApiKey: str('ADMIN_API_KEY', ''),
+  throttle: {
+    ttlMs: int('THROTTLE_TTL_MS', 60_000),
+    limit: int('THROTTLE_LIMIT', 60),
+  },
+  exposeSeedUsers: bool('EXPOSE_SEED_USERS', str('NODE_ENV', 'development') !== 'production'),
 });
 
 function str(key: string, fallback: string): string {

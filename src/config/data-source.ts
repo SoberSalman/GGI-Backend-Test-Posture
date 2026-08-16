@@ -20,6 +20,9 @@ export function buildDataSourceOptions(): DataSourceOptions {
     database: database.database,
     logging: database.logging,
     synchronize: false,
+    // Each chat request holds a connection for the length of its quota
+    // transaction, so the pool is the real ceiling on concurrent requests.
+    poolSize: database.poolSize,
     entities: [`${__dirname}/../**/domain/*.entity.{ts,js}`],
     migrations: [`${__dirname}/../migrations/*.{ts,js}`],
     migrationsTableName: 'typeorm_migrations',
@@ -28,5 +31,4 @@ export function buildDataSourceOptions(): DataSourceOptions {
   };
 }
 
-/** Used by the TypeORM CLI. */
 export default new DataSource(buildDataSourceOptions());
