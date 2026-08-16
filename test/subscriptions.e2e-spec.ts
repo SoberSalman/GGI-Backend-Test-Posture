@@ -134,8 +134,8 @@ describe('Subscription module (e2e)', () => {
         .get(`${API}/subscriptions/${bundle.body.data.id}/payments`)
         .set('x-user-id', user.id);
 
-      expect(payments.body.data).toHaveLength(1);
-      expect(payments.body.data[0]).toMatchObject({
+      expect(payments.body.data).toMatchObject({ total: 1, returned: 1 });
+      expect(payments.body.data.items[0]).toMatchObject({
         kind: 'INITIAL',
         status: 'SUCCEEDED',
         amount: '9.99',
@@ -275,7 +275,7 @@ describe('Subscription module (e2e)', () => {
         .get(`${API}/subscriptions/${bundle.body.data.id}/payments`)
         .set('x-user-id', user.id);
 
-      expect(payments.body.data[0]).toMatchObject({
+      expect(payments.body.data.items[0]).toMatchObject({
         kind: 'RENEWAL',
         status: 'FAILED',
         failureReason: 'issuer_declined',
@@ -339,7 +339,7 @@ describe('Subscription module (e2e)', () => {
         .query({ limit: 100 });
 
       expect(after.body.data.messagesUsed).toBe(1);
-      expect(payments.body.data).toHaveLength(1);
+      expect(payments.body.data.total).toBe(1);
       expect(history.body.data.pagination.total).toBe(4);
     });
 
@@ -465,7 +465,7 @@ describe('Subscription module (e2e)', () => {
       const payments = await request(server)
         .get(`${API}/subscriptions/${bundle.body.data.id}/payments`)
         .set('x-user-id', user.id);
-      const renewalCharges = (payments.body.data as { kind: string }[]).filter(
+      const renewalCharges = (payments.body.data.items as { kind: string }[]).filter(
         (payment) => payment.kind === 'RENEWAL',
       );
       expect(renewalCharges).toHaveLength(1);

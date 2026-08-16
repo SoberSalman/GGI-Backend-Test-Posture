@@ -54,8 +54,8 @@ export class SubscriptionController {
   @Get()
   @ApiOperation({ summary: "List the caller's bundles, newest first" })
   async list(@CurrentUser() user: User) {
-    const subscriptions = await this.subscriptions.listForUser(user.id);
-    return subscriptions.map(toSubscriptionView);
+    const { items, total } = await this.subscriptions.listForUser(user.id);
+    return { items: items.map(toSubscriptionView), total, returned: items.length };
   }
 
   @Get(':id')
@@ -67,8 +67,8 @@ export class SubscriptionController {
   @Get(':id/payments')
   @ApiOperation({ summary: 'Billing history for a bundle (preserved after cancellation)' })
   async payments(@CurrentUser() user: User, @Param('id', ParseUUIDPipe) id: string) {
-    const payments = await this.subscriptions.paymentHistory(id, user.id);
-    return payments.map(toPaymentView);
+    const { items, total } = await this.subscriptions.paymentHistory(id, user.id);
+    return { items: items.map(toPaymentView), total, returned: items.length };
   }
 
   @Patch(':id/auto-renew')

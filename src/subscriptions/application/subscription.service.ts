@@ -15,7 +15,7 @@ import {
   SubscriptionNotFoundError,
 } from '../domain/subscription.errors';
 import { PaymentRepository } from '../infrastructure/payment.repository';
-import { SubscriptionRepository } from '../infrastructure/subscription.repository';
+import { CappedList, SubscriptionRepository } from '../infrastructure/subscription.repository';
 
 export interface CreateSubscriptionCommand {
   userId: string;
@@ -74,7 +74,7 @@ export class SubscriptionService {
     return subscription;
   }
 
-  async listForUser(userId: string): Promise<Subscription[]> {
+  async listForUser(userId: string): Promise<CappedList<Subscription>> {
     return this.subscriptions.findAllForUser(userId);
   }
 
@@ -85,7 +85,7 @@ export class SubscriptionService {
     return subscription;
   }
 
-  async paymentHistory(subscriptionId: string, userId: string): Promise<Payment[]> {
+  async paymentHistory(subscriptionId: string, userId: string): Promise<CappedList<Payment>> {
     await this.getOwned(subscriptionId, userId);
     return this.payments.findForSubscription(subscriptionId);
   }

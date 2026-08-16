@@ -45,12 +45,12 @@ describe('SubscriptionService', () => {
       applyCancellation: jest.fn().mockResolvedValue(undefined),
       applyAutoRenew: jest.fn().mockResolvedValue(undefined),
       findById: jest.fn().mockResolvedValue(stored),
-      findAllForUser: jest.fn().mockResolvedValue([stored]),
+      findAllForUser: jest.fn().mockResolvedValue({ items: [stored], total: 1 }),
     } as unknown as jest.Mocked<SubscriptionRepository>;
 
     payments = {
       record: jest.fn().mockResolvedValue({}),
-      findForSubscription: jest.fn().mockResolvedValue([]),
+      findForSubscription: jest.fn().mockResolvedValue({ items: [], total: 0 }),
     } as unknown as jest.Mocked<PaymentRepository>;
 
     const moduleRef = await Test.createTestingModule({

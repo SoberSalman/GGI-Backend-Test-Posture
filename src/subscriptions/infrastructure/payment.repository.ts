@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { EntityManager, Repository } from 'typeorm';
 import { Payment } from '../domain/payment.entity';
+import { CappedList, MAX_LIST_RESULTS } from './subscription.repository';
 
 export type NewPayment = Omit<Payment, 'id' | 'createdAt' | 'subscription'>;
 
@@ -21,11 +22,12 @@ export class PaymentRepository {
     return repository.save(repository.create(entry));
   }
 
-  async findForSubscription(subscriptionId: string): Promise<Payment[]> {
-    return this.payments.find({
+  async findForSubscription(subscriptionId: string): Promise<CappedList<Payment>> {
+    const [items, total] = await this.payments.findAndCount({
       where: { subscriptionId },
       order: { createdAt: 'DESC' },
-      take: 100,
+      take: MAX_LIST_RESULTS,
     });
+    return { items, total };
   }
 }

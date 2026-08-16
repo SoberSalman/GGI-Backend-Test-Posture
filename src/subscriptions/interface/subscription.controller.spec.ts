@@ -44,24 +44,27 @@ describe('SubscriptionController', () => {
   beforeEach(async () => {
     subscriptions = {
       create: jest.fn().mockResolvedValue(bundle()),
-      listForUser: jest.fn().mockResolvedValue([bundle()]),
+      listForUser: jest.fn().mockResolvedValue({ items: [bundle()], total: 1 }),
       getOwned: jest.fn().mockResolvedValue(bundle()),
       setAutoRenew: jest.fn().mockResolvedValue(bundle({ autoRenew: false, renewalDate: null })),
       cancel: jest
         .fn()
         .mockResolvedValue(bundle({ status: SubscriptionStatus.CANCELLED, cancelledAt: NOW })),
-      paymentHistory: jest.fn().mockResolvedValue([
-        Object.assign(new Payment(), {
-          id: 'pay-1',
-          subscriptionId: 'sub-1',
-          userId: 'user-1',
-          kind: PaymentKind.INITIAL,
-          status: PaymentStatus.SUCCEEDED,
-          amountCents: 2999,
-          failureReason: null,
-          createdAt: NOW,
-        } satisfies Partial<Payment>),
-      ]),
+      paymentHistory: jest.fn().mockResolvedValue({
+        total: 1,
+        items: [
+          Object.assign(new Payment(), {
+            id: 'pay-1',
+            subscriptionId: 'sub-1',
+            userId: 'user-1',
+            kind: PaymentKind.INITIAL,
+            status: PaymentStatus.SUCCEEDED,
+            amountCents: 2999,
+            failureReason: null,
+            createdAt: NOW,
+          } satisfies Partial<Payment>),
+        ],
+      }),
     } as unknown as jest.Mocked<SubscriptionService>;
 
     billing = {
@@ -154,11 +157,23 @@ describe('SubscriptionController', () => {
     );
   });
 
-  it('lists the caller’s bundles as views, not entities', async () => {
+  it('lists the caller’s bundles as views, and says how many exist', async () => {
     const list = await controller.list(USER);
 
-    expect(list).toHaveLength(1);
-    expect(list[0]).toMatchObject({ id: 'sub-1', price: '29.99', remainingMessages: 60 });
+    // total vs returned is what makes a capped list visible rather than
+    // silently short.
+    expect(list).toMatchObject({ total: 1, returned: 1 });
+    expect(list.items[0]).toMatchObject({ id: 'sub-1', price: '29.99', remainingMessages: 60 });
+  });
+
+  it('reports the true total when the list is capped', async () => {
+    // The cap used to be a bare take: 100 with no total, so a user past the
+    // limit got a short list and no way to know.
+    subscriptions.listForUser.mockResolvedValue({ items: [bundle()], total: 137 });
+
+    const list = await controller.list(USER);
+
+    expect(list).toMatchObject({ total: 137, returned: 1 });
   });
 
   it('scopes a single-bundle read to the caller', async () => {
@@ -168,7 +183,12 @@ describe('SubscriptionController', () => {
 
   it('returns billing history', async () => {
     const payments = await controller.payments(USER, 'sub-1');
-    expect(payments[0]).toMatchObject({ kind: 'INITIAL', status: 'SUCCEEDED', amount: '29.99' });
+    expect(payments.total).toBe(1);
+    expect(payments.items[0]).toMatchObject({
+      kind: 'INITIAL',
+      status: 'SUCCEEDED',
+      amount: '29.99',
+    });
   });
 
   it('turns auto-renew off', async () => {

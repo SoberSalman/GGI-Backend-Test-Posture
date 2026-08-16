@@ -316,9 +316,9 @@ Base path `/api/v1`. Every endpoint except `/health` and `/users` requires an
 |--------|------|-------------|
 | `GET` | `/subscriptions/catalog` | Tiers, quotas and prices for both billing cycles |
 | `POST` | `/subscriptions` | Purchase a bundle |
-| `GET` | `/subscriptions` | List the caller's bundles |
+| `GET` | `/subscriptions` | List the caller's bundles (`{ items, total, returned }`) |
 | `GET` | `/subscriptions/:id` | Fetch one bundle |
-| `GET` | `/subscriptions/:id/payments` | Billing history (survives cancellation) |
+| `GET` | `/subscriptions/:id/payments` | Billing history, survives cancellation (`{ items, total, returned }`) |
 | `PATCH` | `/subscriptions/:id/auto-renew` | Turn auto-renew on or off |
 | `POST` | `/subscriptions/:id/cancel` | Cancel, ends the cycle, keeps history |
 
@@ -443,14 +443,14 @@ wait, see `test/subscriptions.e2e-spec.ts`.
 ## Testing
 
 ```bash
-npm test            # 156 unit tests
+npm test            # 157 unit tests
 npm run test:cov    # with coverage
 npm run test:e2e    # 42 end-to-end tests against a real Postgres
 ```
 
 | Suite | Count | Scope |
 |-------|-------|-------|
-| Unit | 156 | Domain policies, entities, application services, guards, filters, presenters, schedulers, config, all with mocked I/O |
+| Unit | 157 | Domain policies, entities, application services, guards, filters, presenters, schedulers, config, all with mocked I/O |
 | E2E | 42 | The real app over HTTP against a real database: the full request path through guards, pipes, transactions and repositories |
 
 **Coverage: 93.4% statements, 91.6% branches, 93.6% lines** (threshold 80%).
@@ -572,6 +572,9 @@ Points where the brief left room to interpret, and the call made:
   scale.
 - **History pagination is `OFFSET`-based**, with `page` capped at 1000. Keyset
   pagination is the correct fix once a user's history gets long.
+- **`GET /subscriptions` and `/subscriptions/:id/payments` cap at 100 rows.**
+  They report `total` alongside `returned`, so a truncated list is visible, but
+  there is no way to fetch page two yet.
 - **Deleting a user cascades** to their subscriptions, payments and chat history.
   Retaining billing records past account deletion would need soft-deleted users.
 - **Swagger is unauthenticated.** Convenient for review, would be gated in

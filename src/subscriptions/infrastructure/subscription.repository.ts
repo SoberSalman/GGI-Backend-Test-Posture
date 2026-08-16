@@ -46,12 +46,17 @@ export class SubscriptionRepository {
       .getOne();
   }
 
-  async findAllForUser(userId: string): Promise<Subscription[]> {
-    return this.subscriptions.find({
+  /**
+   * Capped, and reports the true total so a truncated list is visible to the
+   * caller rather than silently short.
+   */
+  async findAllForUser(userId: string): Promise<CappedList<Subscription>> {
+    const [items, total] = await this.subscriptions.findAndCount({
       where: { userId },
       order: { createdAt: 'DESC' },
-      take: 100,
+      take: MAX_LIST_RESULTS,
     });
+    return { items, total };
   }
 
   async findServingForUser(userId: string): Promise<Subscription[]> {
@@ -201,6 +206,14 @@ type Computed =
   'remainingMessages' | 'isUnlimited' | 'isWithinPeriod' | 'canServe' | 'isDueForRenewal';
 
 /** Every column a new bundle must carry, so a missing one fails to compile. */
+/** A page that stops at `MAX_LIST_RESULTS`; `total` says how many exist. */
+export interface CappedList<T> {
+  items: T[];
+  total: number;
+}
+
+export const MAX_LIST_RESULTS = 100;
+
 export type NewSubscription = Omit<
   Subscription,
   'id' | 'createdAt' | 'updatedAt' | 'user' | Computed
