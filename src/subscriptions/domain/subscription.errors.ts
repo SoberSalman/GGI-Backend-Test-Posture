@@ -10,7 +10,6 @@ export class SubscriptionNotFoundError extends DomainError {
   }
 }
 
-/** The bundle exists but belongs to somebody else. */
 export class SubscriptionAccessDeniedError extends DomainError {
   readonly code = 'SUBSCRIPTION_ACCESS_DENIED';
   readonly status = 403;
@@ -22,7 +21,6 @@ export class SubscriptionAccessDeniedError extends DomainError {
   }
 }
 
-/** The requested transition is not legal from the current status. */
 export class InvalidSubscriptionStateError extends DomainError {
   readonly code = 'INVALID_SUBSCRIPTION_STATE';
   readonly status = 409;

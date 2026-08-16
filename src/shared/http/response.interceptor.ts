@@ -3,10 +3,7 @@ import { Request } from 'express';
 import { Observable, map } from 'rxjs';
 import { ApiResponse } from './api-response';
 
-/**
- * Wraps every successful controller return value in the standard envelope so
- * controllers can stay focused on returning plain domain DTOs.
- */
+/** Wraps successful returns in the standard envelope. */
 @Injectable()
 export class ResponseEnvelopeInterceptor<T> implements NestInterceptor<T, ApiResponse<T>> {
   intercept(context: ExecutionContext, next: CallHandler<T>): Observable<ApiResponse<T>> {

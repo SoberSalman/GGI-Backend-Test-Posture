@@ -4,7 +4,6 @@
  * server's local timezone.
  */
 
-/** Midnight UTC on the 1st of the month containing `date`. */
 export function startOfMonthUtc(date: Date): Date {
   return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), 1, 0, 0, 0, 0));
 }
@@ -21,7 +20,7 @@ export function monthKey(date: Date): string {
 /**
  * Adds whole months, clamping the day-of-month to the last valid day of the
  * target month. Jan 31 + 1 month is Feb 28 (or Feb 29 in a leap year), which is
- * the behaviour every real billing system uses — plain `setMonth` would roll
+ * the behaviour every real billing system uses, plain `setMonth` would roll
  * over into March instead.
  */
 export function addMonthsUtc(date: Date, months: number): Date {

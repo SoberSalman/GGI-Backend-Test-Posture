@@ -6,18 +6,14 @@ import { UnauthenticatedError } from '../domain/errors';
 
 export const USER_ID_HEADER = 'x-user-id';
 
-/** Request augmented with the resolved caller. */
 export interface AuthenticatedRequest extends Request {
   user: User;
 }
 
 /**
- * Stands in for real authentication.
- *
- * The brief scopes this assessment to chat quota and billing, so instead of a
- * JWT stack the caller passes `x-user-id` and this guard resolves it to a real
- * `User` row. Everything downstream receives a verified aggregate, never a raw
- * header string — so swapping in JWTs later means rewriting only this file.
+ * Stands in for real authentication: the caller passes `x-user-id` and this
+ * resolves it to a `User` row, so nothing downstream ever sees a raw header.
+ * Swapping in JWTs means rewriting this file and nothing else.
  */
 @Injectable()
 export class CurrentUserGuard implements CanActivate {

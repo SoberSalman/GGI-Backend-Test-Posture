@@ -29,8 +29,7 @@ export class UserService {
 }
 
 /**
- * Guards the `find` query: Postgres raises `22P02 invalid input syntax for
- * type uuid` on a malformed id, which would surface as a 500 instead of the
- * 401/404 the caller deserves.
+ * Postgres raises `22P02` on a malformed uuid, which would surface as a 500
+ * instead of the 401 the caller deserves.
  */
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;

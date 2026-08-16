@@ -2,11 +2,8 @@ import { Payment } from '../domain/payment.entity';
 import { Subscription } from '../domain/subscription.entity';
 
 /**
- * Shapes aggregates for the wire.
- *
- * Entities are never returned directly: money is stored in cents and exposed as
- * a decimal string, and unlimited quota is expressed as `null` rather than
- * leaking `Infinity` (which is not valid JSON).
+ * Money goes out as a decimal string, and unlimited quota as `null` rather than
+ * `Infinity`, which is not valid JSON.
  */
 export interface SubscriptionView {
   id: string;

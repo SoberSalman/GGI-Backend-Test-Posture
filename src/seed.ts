@@ -17,11 +17,11 @@ import { User } from './users/domain/user.entity';
 /**
  * Seeds four users covering the states worth demonstrating:
  *
- * - alice   — brand new, 3 free messages, no bundles
- * - bob     — free quota spent, one Basic bundle with 2 responses left
- * - carol   — free quota spent, Basic (1 left) + Pro (60 left) stacked, so the
+ * - alice, brand new, 3 free messages, no bundles
+ * - bob, free quota spent, one Basic bundle with 2 responses left
+ * - carol, free quota spent, Basic (1 left) + Pro (60 left) stacked, so the
  *             selection policy has a real choice to make
- * - dave    — free quota spent, an Enterprise bundle (unlimited)
+ * - dave, free quota spent, an Enterprise bundle (unlimited)
  *
  * Idempotent: re-running wipes the seeded rows and rebuilds them.
  */

@@ -10,9 +10,8 @@ import { Subscription } from './subscription.entity';
  * 1. Finite bundles are drained before unlimited ones. An Enterprise bundle has
  *    infinite remaining quota, so a naive "most remaining wins" comparison would
  *    always pick it and let every paid-for Basic/Pro response expire unused.
- * 2. Ties break on the earlier `endDate` — spend what expires soonest first.
+ * 2. Ties break on the earlier `endDate`: spend what expires soonest first.
  *
- * Pure function over already-loaded aggregates: no I/O, trivially unit-testable.
  */
 export function selectBundleToCharge(
   candidates: readonly Subscription[],

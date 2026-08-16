@@ -18,7 +18,7 @@ import { FreeQuotaController } from './interface/free-quota.controller';
   imports: [
     TypeOrmModule.forFeature([ChatMessage, FreeQuota]),
     UsersModule,
-    // Provides SubscriptionQuotaPort — chat never touches subscription tables.
+    // Provides SubscriptionQuotaPort, chat never touches subscription tables.
     SubscriptionsModule,
   ],
   controllers: [ChatController, FreeQuotaController],

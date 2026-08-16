@@ -1,4 +1,3 @@
-/** The three bundle tiers a user can subscribe to. */
 export enum BundleTier {
   BASIC = 'BASIC',
   PRO = 'PRO',
@@ -13,11 +12,10 @@ export enum BillingCycle {
 export enum SubscriptionStatus {
   /** Inside its billing window and able to serve messages. */
   ACTIVE = 'ACTIVE',
-  /** A renewal charge failed — no longer serves messages, can be reactivated. */
+  /** A renewal charge failed; stops serving immediately. */
   INACTIVE = 'INACTIVE',
   /** Cancelled by the user. Runs to the end of the paid period, then expires. */
   CANCELLED = 'CANCELLED',
-  /** Ran past `endDate` without renewing. */
   EXPIRED = 'EXPIRED',
 }
 
@@ -25,16 +23,11 @@ export interface TierDefinition {
   readonly tier: BundleTier;
   /** Responses included per billing period, or `null` for unlimited. */
   readonly maxMessages: number | null;
-  /** Price in minor units (cents) per billing cycle — never floats for money. */
+  /** Cents per billing cycle. Never floats for money. */
   readonly priceCents: Readonly<Record<BillingCycle, number>>;
 }
 
-/**
- * Price/quota catalogue.
- *
- * Yearly is priced at ten months of the monthly rate (two months free), which
- * is the conventional SaaS discount.
- */
+/** Yearly is ten months of the monthly rate, i.e. two months free. */
 export const TIER_CATALOG: Readonly<Record<BundleTier, TierDefinition>> = Object.freeze({
   [BundleTier.BASIC]: {
     tier: BundleTier.BASIC,
@@ -57,7 +50,6 @@ export function tierDefinition(tier: BundleTier): TierDefinition {
   return TIER_CATALOG[tier];
 }
 
-/** `true` when the tier serves an unbounded number of responses. */
 export function isUnlimited(maxMessages: number | null): maxMessages is null {
   return maxMessages === null;
 }

@@ -1,6 +1,5 @@
 import { DomainError } from './domain-error';
 
-/** A requested aggregate does not exist. */
 export class ResourceNotFoundError extends DomainError {
   readonly code = 'RESOURCE_NOT_FOUND';
   readonly status = 404;
@@ -10,7 +9,6 @@ export class ResourceNotFoundError extends DomainError {
   }
 }
 
-/** The caller did not identify itself, or the identity is unknown. */
 export class UnauthenticatedError extends DomainError {
   readonly code = 'UNAUTHENTICATED';
   readonly status = 401;
@@ -20,7 +18,6 @@ export class UnauthenticatedError extends DomainError {
   }
 }
 
-/** The request is well-formed but violates a business rule. */
 export class BusinessRuleViolationError extends DomainError {
   readonly code = 'BUSINESS_RULE_VIOLATION';
   readonly status = 409;

@@ -28,7 +28,7 @@ export class ChatController {
   @ApiOperation({ summary: 'Ask a question and get a (mocked) AI answer' })
   @ApiResponse({
     status: 402,
-    description: 'QUOTA_EXCEEDED — no free messages and no usable bundle',
+    description: 'QUOTA_EXCEEDED: no free messages and no usable bundle',
   })
   async ask(@CurrentUser() user: User, @Body() dto: AskQuestionDto) {
     const { message, reservation } = await this.chat.ask({

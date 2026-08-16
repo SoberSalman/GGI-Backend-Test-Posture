@@ -7,9 +7,8 @@ export interface ApiResponse<T> {
 }
 
 export interface ApiError {
-  /** Stable, machine-readable code — clients branch on this, not on `message`. */
+  /** Clients branch on this, not on `message`. */
   code: string;
-  /** Human-readable explanation, safe to surface to an end user. */
   message: string;
   /** Structured context: which quota was exhausted, which field failed, etc. */
   details?: Record<string, unknown>;

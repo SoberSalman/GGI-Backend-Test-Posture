@@ -1,4 +1,4 @@
-# GGI Backend Test — AI Chat & Subscription Bundles
+# AI Chat & Subscription Bundles
 
 A TypeScript REST API with two domain modules: a **mocked AI chat** service with monthly
 free quota, and a **subscription bundle** service with simulated billing.
@@ -45,7 +45,7 @@ The API is at `http://localhost:3000/api/v1`, Swagger UI at
 `http://localhost:3000/api/v1/docs`.
 
 `npm run seed` prints four user ids. There is no auth module in this assessment
-(see [Design decisions](#design-decisions--assumptions)) — you identify yourself with
+(see [Design decisions](#design-decisions--assumptions)), you identify yourself with
 an `x-user-id` header:
 
 ```bash
@@ -61,7 +61,7 @@ curl -X POST http://localhost:3000/api/v1/chat \
 
 | User  | State |
 |-------|-------|
-| Alice | Brand new — 3 free messages, no bundles |
+| Alice | Brand new: 3 free messages, no bundles |
 | Bob   | Free quota spent, one Basic bundle with 2 responses left |
 | Carol | Free quota spent, Basic (1 left) **and** Pro (60 left) stacked |
 | Dave  | Free quota spent, Enterprise bundle (unlimited) |
@@ -73,7 +73,7 @@ choice to make.
 
 | Command | Purpose |
 |---------|---------|
-| `npm run setup` | Start Postgres, migrate, seed — everything in one go |
+| `npm run setup` | Start Postgres, migrate, seed, everything in one go |
 | `npm run start:dev` | Run with watch mode |
 | `npm run build` / `npm run start:prod` | Compile and run the build |
 | `npm test` | Unit tests |
@@ -89,7 +89,7 @@ choice to make.
 
 ## What it does
 
-### Module 1 — AI chat
+### Module 1, AI chat
 
 - Accepts a question, returns a **mocked** OpenAI response after a simulated network
   delay (randomised inside a configurable window, default 300–1200 ms).
@@ -97,7 +97,7 @@ choice to make.
   token counts.
 - Tracks monthly usage per user: **3 free messages per month**, then a bundle is
   required.
-- Supports **multiple active bundles per user** across three tiers — Basic (10),
+- Supports **multiple active bundles per user** across three tiers, Basic (10),
   Pro (100), Enterprise (unlimited).
 - Deducts from the bundle with the most remaining quota (see
   [the selection rule](#which-bundle-pays)).
@@ -105,7 +105,7 @@ choice to make.
 - Throws a **structured** `QUOTA_EXCEEDED` error carrying the numbers a client needs
   to render a paywall.
 
-### Module 2 — Subscription bundles
+### Module 2, Subscription bundles
 
 - Create a bundle: tier × billing cycle (monthly or yearly) × auto-renew on/off.
 - Every bundle carries `maxMessages`, `price`, `startDate`, `endDate`, `renewalDate`.
@@ -119,7 +119,7 @@ choice to make.
 ## Architecture
 
 Each module is a self-contained vertical slice with four layers. Dependencies only ever
-point inward — the domain layer imports nothing from Nest, TypeORM or Express.
+point inward, the domain layer imports nothing from Nest, TypeORM or Express.
 
 ```
 interface/          HTTP surface: controllers, DTOs, presenters
@@ -129,7 +129,7 @@ application/        Use cases and orchestration: services, outbound ports
       │             (transactions, sequencing; no SQL, no HTTP)
       ▼
 domain/             Entities, value objects, policies, typed errors
-      ▲             (the business rules — pure, framework-free, unit-testable)
+      ▲             (the business rules, pure, framework-free, unit-testable)
       │
 infrastructure/     Adapters: repositories, the mocked AI client, the payment
                     gateway, cron schedulers
@@ -153,7 +153,7 @@ clock or waiting.
 
 The chat module must be able to spend a bundle's quota, but it must not own the
 subscription schema. `SubscriptionQuotaPort` lives in `shared/contracts/` and both
-modules depend on **it** rather than on each other — a small anti-corruption layer that
+modules depend on **it** rather than on each other, a small anti-corruption layer that
 also means there is no module cycle:
 
 ```
@@ -167,10 +167,10 @@ ChatModule ──────► SubscriptionQuotaPort ◄────── Sub
 
 ```
 users
-  └─┬─ free_quotas        (1:1) — this month's free-message counter
-    ├─ chat_messages      (1:N) — append-only Q&A + token history
-    └─ subscriptions      (1:N) — stacked bundles
-         └─ payments      (1:N) — append-only charge history
+  └─┬─ free_quotas        (1:1), this month's free-message counter
+    ├─ chat_messages      (1:N), append-only Q&A + token history
+    └─ subscriptions      (1:N), stacked bundles
+         └─ payments      (1:N), append-only charge history
 ```
 
 | Table | Notable columns |
@@ -180,7 +180,7 @@ users
 | `chat_messages` | `question`, `answer`, `model`, `promptTokens`, `completionTokens`, `totalTokens`, `quotaSource`, `subscriptionId`, `latencyMs` |
 | `payments` | `kind` (INITIAL / RENEWAL), `status` (SUCCEEDED / FAILED), `amountCents`, `failureReason` |
 
-Schema is managed by **migrations**, never `synchronize` — see
+Schema is managed by **migrations**, never `synchronize`, see
 `src/migrations/`. Money is stored as integer **cents** and only formatted as a decimal
 string at the edge; floats never touch a price.
 
@@ -214,7 +214,7 @@ remain.
 ### Free quota reset
 
 The counter row stores the month it belongs to (`periodKey`). Reads compare that key to
-the current month and treat a stale row as **zero used** — so the allowance is already
+the current month and treat a stale row as **zero used**, so the allowance is already
 correct at 00:00 on the 1st, even if no job ever runs. A cron at 00:05 UTC on the 1st
 then rewrites stale rows in bulk, and `POST /billing/reset-free-quota` triggers the same
 job on demand.
@@ -230,16 +230,19 @@ here as **the bundle with the most quota left**. Two refinements make that safe:
 1. **Finite bundles drain before unlimited ones.** An Enterprise bundle has infinite
    remaining quota, so a naive "most remaining wins" comparison would always pick it and
    let every paid-for Basic/Pro response expire unused.
-2. **Ties break on the earlier `endDate`** — spend what expires soonest first.
+2. **Ties break on the earlier `endDate`**, spend what expires soonest first.
 
 The rule is a pure function over loaded aggregates
 (`src/subscriptions/domain/quota-selection.policy.ts`) with 12 unit tests covering it.
 
 ### Concurrency
 
-Quota is money. The reserve step runs in a transaction that takes
-`SELECT ... FOR UPDATE` row locks on the free-quota row and the user's bundles, so two
-simultaneous requests can never both spend the same last response.
+Quota is money. The reserve step runs in a transaction taking `SELECT ... FOR UPDATE`
+row locks on the free-quota row and the user's bundles, so two simultaneous requests
+can never both spend the same last response. Counter writes are atomic `UPDATE`s
+rather than `save(entity)`: a full-entity save writes every column from the snapshot
+the caller read, which would let the billing job roll back a `messagesUsed` increment
+a chat request committed in between.
 
 The e2e suite proves it: fire **20 concurrent requests** at a user holding 3 free
 messages and a 10-response Basic bundle, and exactly **13 return 201 and 7 return 402**.
@@ -272,7 +275,7 @@ A billing run does two things:
      the renewal date is cleared, and the reason is recorded on the bundle and in
      `payments`.
 2. **Expire** bundles whose paid period has closed without renewing (including cancelled
-   ones) — status becomes `EXPIRED`.
+   ones), status becomes `EXPIRED`.
 
 Runs nightly on a cron, **and** on demand via `POST /billing/run` so a reviewer can watch
 renewals and failures without waiting.
@@ -317,7 +320,7 @@ Base path `/api/v1`. Every endpoint except `/health` and `/users` requires an
 | `GET` | `/subscriptions/:id` | Fetch one bundle |
 | `GET` | `/subscriptions/:id/payments` | Billing history (survives cancellation) |
 | `PATCH` | `/subscriptions/:id/auto-renew` | Turn auto-renew on or off |
-| `POST` | `/subscriptions/:id/cancel` | Cancel — ends the cycle, keeps history |
+| `POST` | `/subscriptions/:id/cancel` | Cancel, ends the cycle, keeps history |
 
 ### Operations
 
@@ -326,7 +329,12 @@ Base path `/api/v1`. Every endpoint except `/health` and `/users` requires an
 | `POST` | `/billing/run` | Run the billing cycle now (renew due bundles, expire lapsed ones) |
 | `POST` | `/billing/reset-free-quota` | Roll stale free-message counters into the current month |
 | `GET` | `/health` | Liveness plus a database round-trip |
-| `GET` | `/users` | List seeded users — how you find an `x-user-id` |
+| `GET` | `/users` | Seeded user ids, for the `x-user-id` header. Non-production only. |
+
+Both `/billing` routes act on **every** account, not just the caller's, so they sit
+behind `AdminGuard` rather than `CurrentUserGuard`. Set `ADMIN_API_KEY` and pass it as
+`x-admin-key`; leave it unset and they stay open outside production, which is how the
+walkthrough below drives them.
 
 ### Response envelope
 
@@ -341,8 +349,8 @@ Every response, success or failure, has the same shape:
 }
 ```
 
-Errors carry a stable machine-readable `code` and a structured `details` payload —
-clients branch on `code`, never on `message`:
+Errors carry a stable machine-readable `code` and a structured `details` payload.
+Clients branch on `code`, never on `message`:
 
 ```jsonc
 {
@@ -370,11 +378,13 @@ clients branch on `code`, never on `message`:
 | `UNAUTHENTICATED` | 401 | Missing or unknown `x-user-id` |
 | `VALIDATION_FAILED` | 400 | Request body or query failed validation; `details.violations` lists each one |
 | `SUBSCRIPTION_ACCESS_DENIED` | 403 | The bundle belongs to another user |
+| `ADMIN_ACCESS_DENIED` | 403 | An administrative endpoint was called without a valid key |
+| `TOO_MANY_REQUESTS` | 429 | Rate limit exceeded |
 | `RESOURCE_NOT_FOUND` / `SUBSCRIPTION_NOT_FOUND` | 404 | No such record |
 | `QUOTA_EXCEEDED` | 402 | No free messages and no bundle able to serve |
 | `INVALID_SUBSCRIPTION_STATE` | 409 | Illegal transition (e.g. cancelling twice) |
 | `AI_PROVIDER_ERROR` | 502 | The provider failed; the reserved quota was refunded |
-| `INTERNAL_SERVER_ERROR` | 500 | Unexpected — details are logged, never returned |
+| `INTERNAL_SERVER_ERROR` | 500 | Unexpected, details are logged, never returned |
 
 ---
 
@@ -385,7 +395,7 @@ API=http://localhost:3000/api/v1
 ALICE=$(curl -s $API/users | python3 -c "import sys,json;print(json.load(sys.stdin)['data'][0]['id'])")
 H="content-type: application/json"
 
-# 1. Free tier — three messages, with token accounting and simulated latency
+# 1. Free tier, three messages, with token accounting and simulated latency
 curl -s -X POST $API/chat -H "x-user-id: $ALICE" -H "$H" \
   -d '{"question":"Explain database connection pooling."}'
 #    → quotaSource FREE_TIER, quota.remainingAfter 2, usage.totalTokens > 0
@@ -403,7 +413,7 @@ SUB=$(curl -s -X POST $API/subscriptions -H "x-user-id: $ALICE" -H "$H" \
 curl -s -X POST $API/chat -H "x-user-id: $ALICE" -H "$H" -d '{"question":"now?"}'
 #    → quotaSource SUBSCRIPTION, remainingAfter 9
 
-# 4. Stack a Pro bundle — the next message comes out of Pro, not Basic
+# 4. Stack a Pro bundle, the next message comes out of Pro, not Basic
 curl -s -X POST $API/subscriptions -H "x-user-id: $ALICE" -H "$H" \
   -d '{"tier":"PRO","billingCycle":"MONTHLY","autoRenew":true}'
 curl -s -X POST $API/chat -H "x-user-id: $ALICE" -H "$H" -d '{"question":"which bundle?"}'
@@ -412,7 +422,7 @@ curl -s -X POST $API/chat -H "x-user-id: $ALICE" -H "$H" -d '{"question":"which 
 # 5. See everything at once
 curl -s $API/chat/usage -H "x-user-id: $ALICE"
 
-# 6. Cancel — still usable until endDate, renewal disarmed, history intact
+# 6. Cancel, still usable until endDate, renewal disarmed, history intact
 ID=$(echo $SUB | python3 -c "import sys,json;print(json.load(sys.stdin)['data']['id'])")
 curl -s -X POST $API/subscriptions/$ID/cancel -H "x-user-id: $ALICE"
 curl -s $API/subscriptions/$ID/payments -H "x-user-id: $ALICE"
@@ -426,26 +436,26 @@ curl -s -X POST $API/billing/reset-free-quota -H "x-user-id: $ALICE"
 
 Time-dependent behaviour (a renewal date arriving, a month rolling over) is driven by the
 injected `Clock`, so the **e2e suite** demonstrates it directly rather than asking you to
-wait — see `test/subscriptions.e2e-spec.ts`.
+wait, see `test/subscriptions.e2e-spec.ts`.
 
 ---
 
 ## Testing
 
 ```bash
-npm test            # 130 unit tests
+npm test            # 148 unit tests
 npm run test:cov    # with coverage
-npm run test:e2e    # 37 end-to-end tests against a real Postgres
+npm run test:e2e    # 38 end-to-end tests against a real Postgres
 ```
 
 | Suite | Count | Scope |
 |-------|-------|-------|
-| Unit | 130 | Domain policies, entities, application services, guards, filters, presenters, config — all with mocked I/O |
-| E2E | 37 | The real app over HTTP against a real database: the full request path through guards, pipes, transactions and repositories |
+| Unit | 148 | Domain policies, entities, application services, guards, filters, presenters, schedulers, config, all with mocked I/O |
+| E2E | 38 | The real app over HTTP against a real database: the full request path through guards, pipes, transactions and repositories |
 
-**Coverage: 92.8% statements, 89.6% branches, 93.3% lines** (threshold 80%).
+**Coverage: 90.2% statements, 86.3% branches, 90.2% lines** (threshold 80%).
 
-Repositories are excluded from unit coverage — they are thin TypeORM query wrappers whose
+Repositories are excluded from unit coverage, they are thin TypeORM query wrappers whose
 behaviour (row locks, `ON CONFLICT`, pagination) is only meaningful against a real
 database, which is exactly what the e2e suite exercises.
 
@@ -457,9 +467,17 @@ Notable cases covered:
 
 - three free messages then a structured 402, and the refill on the 1st
 - the bundle-selection rule, including finite-before-unlimited and expiry tiebreaks
+- two unlimited bundles compared head to head, where the remaining-quota
+  subtraction is `Infinity - Infinity` and the comparator has to fall through
 - cancellation still serving until `endDate`, then expiring
 - a declined renewal marking a bundle inactive and stopping it serving
-- 20 concurrent requests against 13 available responses → exactly 13 served
+- an overlapping billing run finding the bundle no longer due, and skipping it
+  rather than charging twice
+- one bundle throwing mid-run without aborting the batch or the expiry sweep
+- 20 concurrent requests against 13 available responses, exactly 13 served
+- a refund arriving after the month rolled over, which must not be credited
+  against the new month's allowance
+- renewal dueness at the exact boundary instant, not a second past it
 - month-boundary date arithmetic (Jan 31 + 1 month = Feb 28; leap years)
 
 ---
@@ -473,13 +491,18 @@ Everything is environment-driven; see `.env.example`.
 | `PORT` | `3000` | HTTP port |
 | `API_PREFIX` | `api/v1` | Global route prefix |
 | `DB_HOST` / `DB_PORT` / `DB_USER` / `DB_PASSWORD` / `DB_NAME` | see `.env.example` | Postgres connection (matches `docker-compose.yml`) |
+| `DB_POOL_SIZE` | `10` | Connection pool. Each chat request holds one for its quota transaction, so this bounds concurrency. |
 | `FREE_MESSAGES_PER_MONTH` | `3` | Free monthly allowance |
 | `MOCK_AI_MIN_DELAY_MS` / `MOCK_AI_MAX_DELAY_MS` | `300` / `1200` | Simulated provider latency window |
 | `MOCK_AI_MODEL` | `gpt-4o-mini` | Model name reported on stored messages |
+| `AI_TIMEOUT_MS` | `15000` | Ceiling on a completion, so a hung provider cannot strand reserved quota |
 | `PAYMENT_FAILURE_RATE` | `0.2` | Probability a simulated renewal charge declines |
+| `ADMIN_API_KEY` | _(unset)_ | Required by the two cross-tenant endpoints. Unset leaves them open outside production and refused in production. |
+| `EXPOSE_SEED_USERS` | non-prod | Whether `GET /users` is mounted |
+| `THROTTLE_TTL_MS` / `THROTTLE_LIMIT` | `60000` / `60` | Rate-limit window and burst |
 | `ENABLE_SCHEDULED_JOBS` | `true` | Turn cron off and drive billing purely via the endpoints |
 
-Config is parsed and **validated at boot** — a non-numeric `PORT` or a
+Config is parsed and **validated at boot**, a non-numeric `PORT` or a
 `PAYMENT_FAILURE_RATE` outside `0..1` fails fast with a clear message rather than
 producing `NaN` at runtime.
 
@@ -506,7 +529,7 @@ Points where the brief left room to interpret, and the call made:
 4. **`x-user-id` instead of JWT auth.** The brief scopes this assessment to quota and
    billing; there is no auth requirement. The guard resolves the header to a real `User`
    row and everything downstream receives a verified aggregate, never a raw header string
-   — so swapping in JWTs means rewriting one file, `shared/auth/current-user.guard.ts`.
+, so swapping in JWTs means rewriting one file, `shared/auth/current-user.guard.ts`.
 
 5. **Cancelled bundles keep serving until `endDate`.** "Ends current billing cycle" is
    read as ending the *renewal*, not confiscating the period already paid for.
@@ -519,17 +542,25 @@ Points where the brief left room to interpret, and the call made:
    `price` string. Floats are never used for money.
 
 8. **Token counts are estimated** at ~4 characters per token, since the provider is
-   mocked. A real client reports `usage` directly and that would replace the heuristic —
-   flagged in the code so it is never mistaken for a billing-grade number.
+   mocked. A real client reports `usage` directly, which would replace the
+   heuristic; it is flagged in the code so nobody mistakes it for a billing-grade
+   number.
 
 ### Known limits
 
-- **The cron is single-process.** Two instances would double-charge. Scaling out needs a
-  distributed lock (a Postgres advisory lock or a job queue) — flagged in
-  `billing.scheduler.ts`.
-- **No rate limiting.** Worth adding at the edge before this faces the public internet.
-- **The billing endpoint is not restricted to admins.** It is an operational convenience
-  for review; in production it belongs behind a role check or off the public API entirely.
+- **Renewal holds a row lock across the gateway call.** Fine against a simulated
+  gateway; a real PSP needs an idempotency key and an outbox so the lock can be
+  released before the network call.
+- **The cron is single-process.** Two instances would both fire, though the
+  `SKIP LOCKED` claim and the dueness re-check inside the transaction mean that
+  is safe rather than a double charge. A job queue is still the right answer at
+  scale.
+- **History pagination is `OFFSET`-based**, with `page` capped at 1000. Keyset
+  pagination is the correct fix once a user's history gets long.
+- **Deleting a user cascades** to their subscriptions, payments and chat history.
+  Retaining billing records past account deletion would need soft-deleted users.
+- **Swagger is unauthenticated.** Convenient for review, would be gated in
+  production.
 
 ---
 
@@ -537,13 +568,13 @@ Points where the brief left room to interpret, and the call made:
 
 ```
 src/
-├── chat/                             Module 1 — AI chat
+├── chat/                             Module 1, AI chat
 │   ├── domain/                       ChatMessage, FreeQuota, typed errors
 │   ├── application/                  ChatService, QuotaService, AiProvider port
 │   ├── infrastructure/               Mock OpenAI client, repositories, reset cron
 │   └── interface/                    Controllers, DTOs, presenter
 │
-├── subscriptions/                    Module 2 — Subscription bundles
+├── subscriptions/                    Module 2, Subscription bundles
 │   ├── domain/                       Subscription, Payment, tier catalog,
 │   │                                 quota-selection policy, typed errors
 │   ├── application/                  SubscriptionService, BillingService,

@@ -5,19 +5,17 @@ export interface QuotaExceededDetails {
   freeMessagesUsed: number;
   freeMessagesRemaining: number;
   activeBundles: number;
-  /** When the free allowance refills — the 1st of next month, UTC. */
+  /** The 1st of next month, UTC. */
   freeQuotaResetsAt: string;
 }
 
 /**
- * The caller has no free messages left and no bundle able to serve one.
- *
- * Structured on purpose: a client can render "0 of 3 free messages left, resets
- * on 1 Sep" and deep-link to checkout straight from `details`.
+ * Carries enough detail for a client to render "0 of 3 free messages left,
+ * resets 1 Sep" and link to checkout without a second request.
  */
 export class QuotaExceededError extends DomainError {
   readonly code = 'QUOTA_EXCEEDED';
-  readonly status = 402; // Payment Required — a bundle is what unblocks the caller.
+  readonly status = 402; // Payment Required: a bundle is what unblocks the caller.
 
   constructor(details: QuotaExceededDetails) {
     super(
@@ -30,7 +28,7 @@ export class QuotaExceededError extends DomainError {
   }
 }
 
-/** The mocked provider failed. Any reserved quota has already been returned. */
+/** The provider failed. The caller is responsible for refunding the reservation. */
 export class AiProviderError extends DomainError {
   readonly code = 'AI_PROVIDER_ERROR';
   readonly status = 502;
