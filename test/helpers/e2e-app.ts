@@ -55,11 +55,24 @@ export interface E2EContext {
 /**
  * Boots the real application against the e2e database, with two seams replaced:
  * a clock the test can move, and a payment gateway the test can script.
- * Everything else — guards, pipes, filters, repositories — is production code.
+ * Everything else, guards, pipes, filters, repositories, is production code.
  */
-export async function createE2EContext(): Promise<E2EContext> {
+export interface E2EOptions {
+  /** Set to exercise the admin gate; unset leaves the endpoints open. */
+  adminApiKey?: string;
+  /** Lowered by the rate-limiting test; the suite otherwise runs uncapped. */
+  throttleLimit?: number;
+}
+
+export async function createE2EContext(options: E2EOptions = {}): Promise<E2EContext> {
   const clock = new FixedClock(E2E_START);
   const gateway = new ScriptedPaymentGateway();
+
+  // Env, not a provider override: both values are read through ConfigService at
+  // module-construction time.
+  const previous = { ...process.env };
+  if (options.adminApiKey) process.env.ADMIN_API_KEY = options.adminApiKey;
+  if (options.throttleLimit) process.env.THROTTLE_LIMIT = String(options.throttleLimit);
 
   const moduleRef = await Test.createTestingModule({ imports: [AppModule] })
     .overrideProvider(Clock)
@@ -95,6 +108,7 @@ export async function createE2EContext(): Promise<E2EContext> {
     },
     close: async () => {
       await app.close();
+      process.env = previous;
     },
   };
 }

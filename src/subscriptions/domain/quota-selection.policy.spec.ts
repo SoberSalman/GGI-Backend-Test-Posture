@@ -56,6 +56,26 @@ describe('selectBundleToCharge', () => {
     expect(selectBundleToCharge([enterprise, spent], NOW)?.id).toBe('unlimited');
   });
 
+  it('breaks ties between two unlimited bundles on the soonest expiry', () => {
+    // Both remainingMessages are Infinity, so the subtraction yields NaN. An
+    // unguarded NaN comparator leaves sort order up to the engine.
+    const later = bundle({
+      id: 'later',
+      tier: BundleTier.ENTERPRISE,
+      maxMessages: null,
+      endDate: new Date('2026-12-01T00:00:00Z'),
+    });
+    const sooner = bundle({
+      id: 'sooner',
+      tier: BundleTier.ENTERPRISE,
+      maxMessages: null,
+      endDate: new Date('2026-09-01T00:00:00Z'),
+    });
+
+    expect(selectBundleToCharge([later, sooner], NOW)?.id).toBe('sooner');
+    expect(selectBundleToCharge([sooner, later], NOW)?.id).toBe('sooner');
+  });
+
   it('breaks ties on the soonest expiry', () => {
     const later = bundle({ id: 'later', endDate: new Date('2026-12-01T00:00:00Z') });
     const sooner = bundle({ id: 'sooner', endDate: new Date('2026-09-01T00:00:00Z') });

@@ -1,3 +1,4 @@
+import { ConfigService } from '@nestjs/config';
 import { Test } from '@nestjs/testing';
 import { CurrentUserGuard } from '../../shared/auth/current-user.guard';
 import { User } from '../../users/domain/user.entity';
@@ -94,6 +95,7 @@ describe('SubscriptionController', () => {
       providers: [
         { provide: SubscriptionService, useValue: subscriptions },
         { provide: BillingService, useValue: billing },
+        { provide: ConfigService, useValue: { get: () => '' } },
       ],
     })
       .overrideGuard(CurrentUserGuard)

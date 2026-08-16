@@ -250,8 +250,8 @@ describe('Subscription module (e2e)', () => {
       ctx.gateway.failFor(bundle.body.data.id);
       await runBilling(user);
 
-      // The clock has crossed into September, so the free allowance refilled —
-      // spend it before checking that the dead bundle cannot cover the next one.
+      // The clock crossed into September, so the free allowance refilled.
+      // Spend it before checking the dead bundle cannot cover the next one.
       for (let i = 0; i < 3; i += 1) {
         expect((await askOnce(user)).status).toBe(201);
       }

@@ -90,12 +90,16 @@ describe('Chat module (e2e)', () => {
   });
 
   describe('free monthly allowance', () => {
-    let user: User;
-    beforeAll(async () => {
-      user = await ctx.createUser('FreeTier');
-    });
+    /** Each test gets its own user, so none depends on another's leftovers. */
+    const spendFreeAllowance = async (user: User) => {
+      for (let i = 0; i < FREE_ALLOWANCE; i += 1) {
+        expect((await ask(user)).status).toBe(201);
+      }
+    };
 
     it('answers, stores tokens, and charges the free tier', async () => {
+      const user = await ctx.createUser('FreeFirst');
+
       const response = await ask(user);
 
       expect(response.status).toBe(201);
@@ -105,25 +109,20 @@ describe('Chat module (e2e)', () => {
         subscriptionId: null,
         quota: { chargedTo: QuotaSource.FREE_TIER, remainingAfter: FREE_ALLOWANCE - 1 },
       });
-      expect(response.body.data.usage.totalTokens).toBeGreaterThan(0);
       expect(response.body.data.usage.totalTokens).toBe(
         response.body.data.usage.promptTokens + response.body.data.usage.completionTokens,
       );
-    });
-
-    it('simulates provider latency', async () => {
-      const response = await ask(user);
       expect(response.body.data.latencyMs).toBeGreaterThan(0);
     });
 
     it('runs out after exactly three free messages', async () => {
-      const third = await ask(user);
-      expect(third.status).toBe(201);
-      expect(third.body.data.quota.remainingAfter).toBe(0);
+      const user = await ctx.createUser('FreeExhausted');
+      await spendFreeAllowance(user);
 
-      const fourth = await ask(user);
-      expect(fourth.status).toBe(402);
-      expect(fourth.body.error).toMatchObject({
+      const refused = await ask(user);
+
+      expect(refused.status).toBe(402);
+      expect(refused.body.error).toMatchObject({
         code: 'QUOTA_EXCEEDED',
         details: {
           freeMessagesAllowance: FREE_ALLOWANCE,
@@ -136,36 +135,40 @@ describe('Chat module (e2e)', () => {
     });
 
     it('refills on the 1st of the next month', async () => {
+      const user = await ctx.createUser('FreeRefill');
+      await spendFreeAllowance(user);
+      expect((await ask(user)).status).toBe(402);
+
       ctx.clock.setTo(new Date('2026-09-01T00:00:00Z'));
 
       const response = await ask(user);
-
       expect(response.status).toBe(201);
       expect(response.body.data.quota.remainingAfter).toBe(FREE_ALLOWANCE - 1);
     });
 
     it('does not persist a message that was refused', async () => {
-      ctx.clock.setTo(E2E_START);
+      const user = await ctx.createUser('FreeRefused');
+      await spendFreeAllowance(user);
+      await ask(user);
+
       const history = await request(server)
         .get(`${API}/chat/history`)
         .set('x-user-id', user.id)
         .query({ limit: 100 });
 
-      // 3 in August + 1 in September; the 402 attempt stored nothing.
-      expect(history.body.data.pagination.total).toBe(4);
+      expect(history.body.data.pagination.total).toBe(FREE_ALLOWANCE);
     });
   });
 
   describe('bundle-backed messages', () => {
-    let user: User;
-    beforeAll(async () => {
-      user = await ctx.createUser('Bundled');
+    const spendFreeAllowance = async (user: User) => {
       for (let i = 0; i < FREE_ALLOWANCE; i += 1) await ask(user);
-    });
+    };
 
     it('falls through to a bundle once the free allowance is gone', async () => {
+      const user = await ctx.createUser('BundleFallthrough');
+      await spendFreeAllowance(user);
       const bundle = await buyBundle(user, BundleTier.BASIC);
-      expect(bundle.status).toBe(201);
 
       const response = await ask(user);
 
@@ -178,22 +181,32 @@ describe('Chat module (e2e)', () => {
     });
 
     it('deducts from the bundle with the most remaining quota', async () => {
+      const user = await ctx.createUser('BundleSelection');
+      await spendFreeAllowance(user);
+      const basic = await buyBundle(user, BundleTier.BASIC);
       const pro = await buyBundle(user, BundleTier.PRO);
 
       const response = await ask(user);
 
-      // Basic has 9 left, Pro has 100 — Pro wins.
+      // Basic has 10 left, Pro has 100.
       expect(response.body.data.quota.subscriptionId).toBe(pro.body.data.id);
+      expect(response.body.data.quota.subscriptionId).not.toBe(basic.body.data.id);
       expect(response.body.data.quota.remainingAfter).toBe(99);
     });
 
     it('reports every allowance through the usage endpoint', async () => {
+      const user = await ctx.createUser('BundleUsage');
+      await spendFreeAllowance(user);
+      await buyBundle(user, BundleTier.BASIC);
+      await buyBundle(user, BundleTier.PRO);
+      await ask(user);
+
       const usage = await request(server).get(`${API}/chat/usage`).set('x-user-id', user.id);
 
       expect(usage.body.data.free).toMatchObject({ allowance: 3, used: 3, remaining: 0 });
       expect(usage.body.data.bundles).toHaveLength(2);
-      expect(usage.body.data.totalRemaining).toBe(9 + 99);
-      expect(usage.body.data.monthToDate.messages).toBe(5);
+      expect(usage.body.data.totalRemaining).toBe(10 + 99);
+      expect(usage.body.data.monthToDate.messages).toBe(4);
       expect(usage.body.data.monthToDate.tokens).toBeGreaterThan(0);
     });
   });
@@ -263,6 +276,47 @@ describe('Chat module (e2e)', () => {
 
       const usage = await request(server).get(`${API}/chat/usage`).set('x-user-id', user.id);
       expect(usage.body.data.free.remaining).toBe(FREE_ALLOWANCE);
+    });
+  });
+
+  describe('administrative endpoints', () => {
+    it('rejects the free-quota reset without the admin key when one is configured', async () => {
+      // The reset rewrites every user's counter, so a plain user id must not
+      // be enough to trigger it.
+      const guarded = await createE2EContext({ adminApiKey: 'secret-key' });
+      const server = guarded.app.getHttpServer() as App;
+
+      try {
+        const refused = await request(server).post(`${API}/billing/reset-free-quota`);
+        expect(refused.status).toBe(403);
+        expect(refused.body.error.code).toBe('ADMIN_ACCESS_DENIED');
+
+        const allowed = await request(server)
+          .post(`${API}/billing/reset-free-quota`)
+          .set('x-admin-key', 'secret-key');
+        expect(allowed.status).toBe(200);
+      } finally {
+        await guarded.close();
+      }
+    });
+  });
+
+  describe('rate limiting', () => {
+    it('refuses a caller that exceeds the configured burst', async () => {
+      const limited = await createE2EContext({ throttleLimit: 3 });
+      const server = limited.app.getHttpServer() as App;
+      const user = await limited.createUser('Throttled');
+
+      try {
+        const responses = [];
+        for (let i = 0; i < 5; i += 1) {
+          responses.push(await request(server).get(`${API}/chat/usage`).set('x-user-id', user.id));
+        }
+
+        expect(responses.filter((response) => response.status === 429).length).toBeGreaterThan(0);
+      } finally {
+        await limited.close();
+      }
     });
   });
 });

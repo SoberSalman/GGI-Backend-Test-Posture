@@ -8,7 +8,7 @@ describe('billing period helpers', () => {
     });
 
     it('uses UTC, not the local timezone', () => {
-      // 23:30 on 31 Jan UTC is already February in UTC+2 — must still read as January.
+      // 23:30 on 31 Jan UTC is already February in UTC+2, must still read as January.
       expect(monthKey(new Date('2026-01-31T23:30:00Z'))).toBe('2026-01');
     });
   });

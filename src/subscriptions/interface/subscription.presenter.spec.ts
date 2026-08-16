@@ -47,7 +47,7 @@ describe('subscription presenter', () => {
 
     expect(view.remainingMessages).toBeNull();
     expect(view.unlimited).toBe(true);
-    // Infinity is not representable in JSON — it would serialise as null anyway
+    // Infinity is not representable in JSON, it would serialise as null anyway
     // but only after passing through a value no client could reason about.
     const roundTripped = JSON.parse(JSON.stringify(view)) as SubscriptionView;
     expect(roundTripped.remainingMessages).toBeNull();

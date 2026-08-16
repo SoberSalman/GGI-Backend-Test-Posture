@@ -1,3 +1,4 @@
+import { ConfigService } from '@nestjs/config';
 import { Test } from '@nestjs/testing';
 import { CurrentUserGuard } from '../../shared/auth/current-user.guard';
 import { Clock, FixedClock } from '../../shared/time/clock';
@@ -66,6 +67,7 @@ describe('ChatController', () => {
         { provide: ChatService, useValue: chat },
         { provide: QuotaService, useValue: quota },
         { provide: Clock, useValue: new FixedClock(NOW) },
+        { provide: ConfigService, useValue: { get: () => '' } },
       ],
     })
       .overrideGuard(CurrentUserGuard)
@@ -98,6 +100,7 @@ describe('ChatController', () => {
         reservation: {
           source: QuotaSource.SUBSCRIPTION,
           subscriptionId: 'sub-1',
+          periodKey: null,
           remainingAfter: 9,
         },
       });
