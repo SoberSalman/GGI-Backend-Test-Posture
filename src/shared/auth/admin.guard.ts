@@ -16,16 +16,11 @@ export class AdminAccessDeniedError extends DomainError {
 }
 
 /**
- * Gate for operations that reach across every account.
+ * These endpoints act on every account, so `CurrentUserGuard` is the wrong
+ * control: it proves you are *a* user, not that you may touch everyone's data.
  *
- * The billing run charges every due bundle and the quota reset rewrites every
- * counter, so `CurrentUserGuard` is the wrong control: it proves the caller is
- * *a* user, not that they may act on everyone else's data.
- *
- * Fails closed. An earlier version allowed the request whenever `NODE_ENV` was
- * not exactly 'production', which meant an unset or misspelled value opened
- * these routes to anyone. Opening them now takes a deliberate
- * `ALLOW_UNAUTHENTICATED_ADMIN=true`, which itself is refused in production.
+ * Fails closed. No key means denied, unless `ALLOW_UNAUTHENTICATED_ADMIN` is
+ * set, which is itself refused in production.
  */
 @Injectable()
 export class AdminGuard implements CanActivate {

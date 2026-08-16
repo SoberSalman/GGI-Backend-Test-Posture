@@ -76,10 +76,7 @@ export const configuration = (): AppConfig => ({
   exposeSeedUsers: bool('EXPOSE_SEED_USERS', false),
 });
 
-/**
- * Validated rather than free text: two security defaults used to hinge on this
- * matching 'production' exactly, so 'Production' or an unset value opened them.
- */
+/** Validated, because security defaults key off it and a typo must not pass. */
 function environment(): Environment {
   const raw = str('NODE_ENV', 'development');
   if (!(ENVIRONMENTS as readonly string[]).includes(raw)) {

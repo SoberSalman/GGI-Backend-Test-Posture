@@ -89,20 +89,13 @@ export class BillingService {
   }
 
   /**
-   * Charges one bundle and applies the result in a single transaction.
+   * Re-reads the row under a lock and re-checks dueness before charging, so an
+   * overlapping run cannot charge the same bundle twice. Payment and period
+   * advance commit together.
    *
-   * The row is re-read under a lock and re-checked for dueness: if an
-   * overlapping run already renewed it, the renewal date has moved and this run
-   * skips it rather than charging twice. Writing the payment and the period
-   * advance in one transaction closes the other half of that hole, where a
-   * crash between the two left the bundle due with the money already taken.
-   *
-   * Note what this does and does not buy. It makes the local writes atomic, so
-   * a crash can no longer leave the period unadvanced with a payment recorded.
-   * It does NOT make the charge itself safe to repeat: a crash after the
-   * gateway returns but before the commit rolls back the payment row, and the
-   * next run charges again. A real PSP needs an idempotency key for that, and
-   * an outbox so the row lock is released before the network call.
+   * The charge itself is still not safe to repeat: crash after the gateway
+   * returns and the rollback loses the payment row, so the next run charges
+   * again. Needs an idempotency key against a real PSP.
    */
   private async renewOne(subscriptionId: string, runAt: Date): Promise<RenewalOutcome> {
     return this.dataSource.transaction(async (manager) => {

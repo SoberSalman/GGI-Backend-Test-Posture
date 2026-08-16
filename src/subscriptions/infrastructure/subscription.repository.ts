@@ -14,12 +14,9 @@ export interface RenewalUpdate {
 }
 
 /**
- * Persistence for the `Subscription` aggregate.
- *
- * Writes are targeted `UPDATE`s, not `save(entity)`. A full-entity save writes
- * every column from the snapshot the caller read, so the billing job would
- * silently roll back a `messagesUsed` increment a chat request committed in
- * between. Each method touches only the columns it owns.
+ * Writes are targeted `UPDATE`s, never `save(entity)`. A full-entity save writes
+ * every column from the caller's snapshot, so the billing job would roll back a
+ * `messagesUsed` increment a chat request committed in between.
  */
 @Injectable()
 export class SubscriptionRepository {
@@ -103,10 +100,9 @@ export class SubscriptionRepository {
   /**
    * Claims the bundles due for renewal `FOR UPDATE SKIP LOCKED`.
    *
-   * `SKIP LOCKED` only settles the race between two runs issuing this query at
-   * the same instant. It is not what prevents double charging: this transaction
-   * commits as soon as the rows are read, so a later run sees them again. The
-   * actual guarantee is the lock and dueness re-check in `renewOne`.
+   * `SKIP LOCKED` only settles two runs issuing this query at the same instant.
+   * It does not prevent double charging: this transaction commits once the rows
+   * are read, so a later run sees them again. That is `renewOne`'s job.
    */
   async claimDueForRenewal(now: Date, manager: EntityManager): Promise<Subscription[]> {
     return manager

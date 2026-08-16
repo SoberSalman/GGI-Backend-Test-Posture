@@ -54,15 +54,11 @@ export class FreeQuotaRepository {
   }
 
   /**
-   * Hands one free message back, atomically.
+   * One conditional UPDATE, not load-mutate-save, so a concurrent reserve is
+   * not clobbered. The period is in the WHERE because a slow provider call can
+   * fail after the counter has already rolled into the next month.
    *
-   * The period is part of the WHERE rather than checked in memory: a refund is
-   * only valid against the month it was reserved in, and by the time a slow
-   * provider call fails the counter may already have rolled over. Load, mutate
-   * and full-save would also clobber a concurrent reserve that committed in
-   * between, which is the same lost update the subscription writes avoid.
-   *
-   * @returns whether a row was actually credited.
+   * @returns whether a row was credited.
    */
   async refundOne(userId: string, reservedPeriod: string): Promise<boolean> {
     const result = await this.quotas
