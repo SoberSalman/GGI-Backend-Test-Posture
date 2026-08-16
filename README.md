@@ -135,6 +135,19 @@ infrastructure/     Adapters: repositories, the mocked AI client, the payment
                     gateway, cron schedulers
 ```
 
+The brief names the layers `domain/entities`, `services`, `repositories`,
+`controllers`. Those map onto the directories above one-to-one:
+
+| Brief | Directory | Example |
+|-------|-----------|---------|
+| `domain/entities` | `domain/` | `Subscription`, `FreeQuota`, `selectBundleToCharge` |
+| `services` | `application/` | `ChatService`, `QuotaService`, `BillingService` |
+| `repositories` | `infrastructure/` | `SubscriptionRepository`, `ChatMessageRepository` |
+| `controllers` | `interface/` | `ChatController`, `SubscriptionController` |
+
+The directory names follow the usual hexagonal convention so the outbound ports
+have an obvious home, but the classes are named exactly as the brief describes.
+
 ### Ports and adapters
 
 Three abstractions decouple the parts that would otherwise be hard to test or swap:
