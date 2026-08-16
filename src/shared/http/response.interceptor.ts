@@ -1,0 +1,27 @@
+import { CallHandler, ExecutionContext, Injectable, NestInterceptor } from '@nestjs/common';
+import { Request } from 'express';
+import { Observable, map } from 'rxjs';
+import { ApiResponse } from './api-response';
+
+/**
+ * Wraps every successful controller return value in the standard envelope so
+ * controllers can stay focused on returning plain domain DTOs.
+ */
+@Injectable()
+export class ResponseEnvelopeInterceptor<T> implements NestInterceptor<T, ApiResponse<T>> {
+  intercept(context: ExecutionContext, next: CallHandler<T>): Observable<ApiResponse<T>> {
+    const request = context.switchToHttp().getRequest<Request>();
+
+    return next.handle().pipe(
+      map((data) => ({
+        success: true,
+        data: data ?? null,
+        error: null,
+        meta: {
+          timestamp: new Date().toISOString(),
+          path: request.originalUrl,
+        },
+      })),
+    );
+  }
+}
