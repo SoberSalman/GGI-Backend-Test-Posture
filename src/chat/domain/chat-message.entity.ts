@@ -9,7 +9,6 @@ import {
 } from 'typeorm';
 import { User } from '../../users/domain/user.entity';
 
-/** Which allowance paid for a response. */
 export enum QuotaSource {
   FREE_TIER = 'FREE_TIER',
   SUBSCRIPTION = 'SUBSCRIPTION',
@@ -28,7 +27,6 @@ export class ChatMessage {
   id!: string;
 
   @Column({ type: 'uuid' })
-  @Index()
   userId!: string;
 
   @ManyToOne(() => User, { onDelete: 'CASCADE' })
@@ -60,7 +58,6 @@ export class ChatMessage {
   @Column({ type: 'uuid', nullable: true })
   subscriptionId!: string | null;
 
-  /** Simulated provider round-trip in milliseconds. */
   @Column({ type: 'int' })
   latencyMs!: number;
 

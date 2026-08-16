@@ -15,25 +15,25 @@ export enum PaymentStatus {
 }
 
 export enum PaymentKind {
-  /** The charge taken when the bundle was first purchased. */
   INITIAL = 'INITIAL',
-  /** A recurring charge attempted by the billing job. */
   RENEWAL = 'RENEWAL',
 }
 
 /**
- * Immutable audit record of every simulated charge.
+ * Append-only record of every simulated charge.
  *
- * Kept for the lifetime of the account — cancelling a bundle must preserve
- * billing and usage history, so nothing here is ever deleted or updated.
+ * Cancelling or expiring a bundle leaves these rows untouched; only deleting
+ * the user removes them, via cascade. A system that has to retain billing
+ * records past account deletion would need soft-deleted users instead.
  */
 @Entity({ name: 'payments' })
+@Index(['subscriptionId', 'createdAt'])
+@Index(['userId', 'createdAt'])
 export class Payment {
   @PrimaryGeneratedColumn('uuid')
   id!: string;
 
   @Column({ type: 'uuid' })
-  @Index()
   subscriptionId!: string;
 
   @ManyToOne(() => Subscription, { onDelete: 'CASCADE' })
@@ -41,7 +41,6 @@ export class Payment {
   subscription?: Subscription;
 
   @Column({ type: 'uuid' })
-  @Index()
   userId!: string;
 
   @Column({ type: 'enum', enum: PaymentKind, enumName: 'payment_kind_enum' })
