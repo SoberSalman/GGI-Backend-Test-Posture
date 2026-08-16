@@ -12,8 +12,6 @@ export interface NewPayment {
   failureReason?: string | null;
 }
 
-const MAX_PAYMENTS_RETURNED = 100;
-
 @Injectable()
 export class PaymentRepository {
   constructor(
@@ -32,18 +30,11 @@ export class PaymentRepository {
     );
   }
 
-  async findForSubscription(
-    subscriptionId: string,
-    limit = MAX_PAYMENTS_RETURNED,
-  ): Promise<Payment[]> {
+  async findForSubscription(subscriptionId: string): Promise<Payment[]> {
     return this.payments.find({
       where: { subscriptionId },
       order: { createdAt: 'DESC' },
-      take: limit,
+      take: 100,
     });
-  }
-
-  async findForUser(userId: string, limit = MAX_PAYMENTS_RETURNED): Promise<Payment[]> {
-    return this.payments.find({ where: { userId }, order: { createdAt: 'DESC' }, take: limit });
   }
 }

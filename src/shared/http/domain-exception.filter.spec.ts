@@ -1,8 +1,17 @@
 import { ArgumentsHost, BadRequestException, NotFoundException } from '@nestjs/common';
 import { ApiResponse } from './api-response';
 import { DomainError } from '../domain/domain-error';
-import { BusinessRuleViolationError, UnauthenticatedError } from '../domain/errors';
+import { UnauthenticatedError } from '../domain/errors';
 import { DomainExceptionFilter } from './domain-exception.filter';
+
+class TestConflictError extends DomainError {
+  readonly code = 'BUSINESS_RULE_VIOLATION';
+  readonly status = 409;
+
+  constructor() {
+    super('Nope.');
+  }
+}
 
 class TestQuotaError extends DomainError {
   readonly code = 'QUOTA_EXCEEDED';
@@ -104,7 +113,7 @@ describe('DomainExceptionFilter', () => {
   it('handles a business rule violation as a 409', () => {
     const { host, status } = hostFor();
 
-    filter.catch(new BusinessRuleViolationError('Nope'), host);
+    filter.catch(new TestConflictError(), host);
 
     expect(status).toHaveBeenCalledWith(409);
   });

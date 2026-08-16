@@ -1,7 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import { ResourceNotFoundError } from '../../shared/domain/errors';
 import { User } from '../domain/user.entity';
 
 @Injectable()
@@ -15,12 +14,6 @@ export class UserService {
   async find(id: string): Promise<User | null> {
     if (!UUID_PATTERN.test(id)) return null;
     return this.users.findOne({ where: { id } });
-  }
-
-  async getOrThrow(id: string): Promise<User> {
-    const user = await this.find(id);
-    if (!user) throw new ResourceNotFoundError('User', id);
-    return user;
   }
 
   async list(): Promise<User[]> {

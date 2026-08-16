@@ -17,5 +17,4 @@ export interface ApiError {
 export interface ApiMeta {
   timestamp: string;
   path: string;
-  [key: string]: unknown;
 }

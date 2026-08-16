@@ -12,6 +12,11 @@ export function startOfMonthUtc(date: Date): Date {
  * `YYYY-MM` key identifying the calendar month of `date`.
  * Used as the free-quota period marker.
  */
+/** Midnight UTC on the 1st of the following month. */
+export function startOfNextMonthUtc(date: Date): Date {
+  return addMonthsUtc(startOfMonthUtc(date), 1);
+}
+
 export function monthKey(date: Date): string {
   const month = `${date.getUTCMonth() + 1}`.padStart(2, '0');
   return `${date.getUTCFullYear()}-${month}`;

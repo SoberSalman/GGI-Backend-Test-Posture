@@ -41,24 +41,22 @@ export class SubscriptionService {
     const definition = tierDefinition(command.tier);
     const endDate = addBillingCycle(now, command.billingCycle);
 
-    const subscription = await this.subscriptions.insert(
-      this.subscriptions.create({
-        userId: command.userId,
-        tier: command.tier,
-        billingCycle: command.billingCycle,
-        status: SubscriptionStatus.ACTIVE,
-        maxMessages: definition.maxMessages,
-        messagesUsed: 0,
-        priceCents: definition.priceCents[command.billingCycle],
-        autoRenew: command.autoRenew,
-        startDate: now,
-        endDate,
-        renewalDate: command.autoRenew ? endDate : null,
-        cancelledAt: null,
-        renewalCount: 0,
-        lastPaymentFailureReason: null,
-      }),
-    );
+    const subscription = await this.subscriptions.insert({
+      userId: command.userId,
+      tier: command.tier,
+      billingCycle: command.billingCycle,
+      status: SubscriptionStatus.ACTIVE,
+      maxMessages: definition.maxMessages,
+      messagesUsed: 0,
+      priceCents: definition.priceCents[command.billingCycle],
+      autoRenew: command.autoRenew,
+      startDate: now,
+      endDate,
+      renewalDate: command.autoRenew ? endDate : null,
+      cancelledAt: null,
+      renewalCount: 0,
+      lastPaymentFailureReason: null,
+    });
 
     await this.payments.record({
       subscriptionId: subscription.id,

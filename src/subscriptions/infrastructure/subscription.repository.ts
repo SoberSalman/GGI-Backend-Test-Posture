@@ -32,12 +32,8 @@ export class SubscriptionRepository {
     return manager ? manager.getRepository(Subscription) : this.subscriptions;
   }
 
-  create(data: NewSubscription): Subscription {
-    return this.subscriptions.create(data);
-  }
-
-  async insert(subscription: Subscription): Promise<Subscription> {
-    return this.subscriptions.save(subscription);
+  async insert(data: NewSubscription): Promise<Subscription> {
+    return this.subscriptions.save(this.subscriptions.create(data));
   }
 
   async findById(id: string, manager?: EntityManager): Promise<Subscription | null> {
@@ -53,11 +49,11 @@ export class SubscriptionRepository {
       .getOne();
   }
 
-  async findAllForUser(userId: string, limit = MAX_BUNDLES_RETURNED): Promise<Subscription[]> {
+  async findAllForUser(userId: string): Promise<Subscription[]> {
     return this.subscriptions.find({
       where: { userId },
       order: { createdAt: 'DESC' },
-      take: limit,
+      take: 100,
     });
   }
 
@@ -204,9 +200,13 @@ export class SubscriptionRepository {
 
 export type NewSubscription = Omit<
   Subscription,
-  'id' | 'createdAt' | 'updatedAt' | 'user' | 'remainingMessages' | 'isUnlimited' | keyof Behaviour
+  | 'id'
+  | 'createdAt'
+  | 'updatedAt'
+  | 'user'
+  | 'remainingMessages'
+  | 'isUnlimited'
+  | 'isWithinPeriod'
+  | 'canServe'
+  | 'isDueForRenewal'
 >;
-
-type Behaviour = Pick<Subscription, 'isWithinPeriod' | 'canServe' | 'isDueForRenewal'>;
-
-const MAX_BUNDLES_RETURNED = 100;

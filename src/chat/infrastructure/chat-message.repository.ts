@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import { addMonthsUtc, startOfMonthUtc } from '../../shared/time/billing-period';
+import { startOfMonthUtc, startOfNextMonthUtc } from '../../shared/time/billing-period';
 import { ChatMessage } from '../domain/chat-message.entity';
 
 export interface MonthToDateUsage {
@@ -60,8 +60,4 @@ export class ChatMessageRepository {
       tokens: Number.parseInt(row?.tokens ?? '0', 10),
     };
   }
-}
-
-function startOfNextMonthUtc(now: Date): Date {
-  return addMonthsUtc(startOfMonthUtc(now), 1);
 }

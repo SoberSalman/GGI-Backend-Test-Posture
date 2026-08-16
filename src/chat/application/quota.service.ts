@@ -5,7 +5,7 @@ import {
   BundleQuotaSnapshot,
   SubscriptionQuotaPort,
 } from '../../shared/contracts/subscription-quota.port';
-import { addMonthsUtc, startOfMonthUtc } from '../../shared/time/billing-period';
+import { startOfMonthUtc, startOfNextMonthUtc } from '../../shared/time/billing-period';
 import { Clock } from '../../shared/time/clock';
 import { QuotaSource } from '../domain/chat-message.entity';
 import { QuotaExceededError } from '../domain/chat.errors';
@@ -97,7 +97,7 @@ export class QuotaService {
         freeMessagesUsed: freeQuota.usedIn(now),
         freeMessagesRemaining: 0,
         activeBundles: (await this.bundles.describeUsableBundles(userId, now)).length,
-        freeQuotaResetsAt: nextResetAt(now).toISOString(),
+        freeQuotaResetsAt: startOfNextMonthUtc(now).toISOString(),
       });
     });
   }
@@ -163,7 +163,7 @@ export class QuotaService {
         used,
         remaining: freeRemaining,
         periodStart: startOfMonthUtc(now).toISOString(),
-        resetsAt: nextResetAt(now).toISOString(),
+        resetsAt: startOfNextMonthUtc(now).toISOString(),
       },
       bundles,
       totalRemaining: hasUnlimited ? null : freeRemaining + bundleRemaining,
@@ -176,9 +176,4 @@ export class QuotaService {
     this.logger.log(`Free quota reset: ${rowsReset} counter(s) rolled into the current month`);
     return { resetAt, rowsReset };
   }
-}
-
-/** Midnight UTC on the 1st of next month, when the free allowance refills. */
-export function nextResetAt(now: Date): Date {
-  return addMonthsUtc(startOfMonthUtc(now), 1);
 }

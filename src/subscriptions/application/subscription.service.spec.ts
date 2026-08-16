@@ -35,15 +35,12 @@ describe('SubscriptionService', () => {
     } satisfies Partial<Subscription>);
 
     subscriptions = {
-      create: jest
-        .fn()
-        .mockImplementation((data: Partial<Subscription>) =>
-          Object.assign(new Subscription(), data),
-        ),
+      // Returns a real entity, as the repository does, so the getters the
+      // assertions rely on are actually present.
       insert: jest
         .fn()
-        .mockImplementation((s: Subscription) =>
-          Promise.resolve(Object.assign(s, { id: 'sub-1' })),
+        .mockImplementation((data: Partial<Subscription>) =>
+          Promise.resolve(Object.assign(new Subscription(), data, { id: 'sub-1' })),
         ),
       applyCancellation: jest.fn().mockResolvedValue(undefined),
       applyAutoRenew: jest.fn().mockResolvedValue(undefined),
