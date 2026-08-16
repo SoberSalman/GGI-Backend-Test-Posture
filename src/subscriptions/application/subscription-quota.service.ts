@@ -5,15 +5,10 @@ import {
   BundleReservation,
   SubscriptionQuotaPort,
 } from '../../shared/contracts/subscription-quota.port';
-import { Subscription } from '../domain/subscription.entity';
 import { selectBundleToCharge } from '../domain/quota-selection.policy';
 import { SubscriptionRepository } from '../infrastructure/subscription.repository';
 
-/**
- * Subscriptions-side implementation of the chat module's quota contract.
- *
- * This is the only place chat usage touches subscription state.
- */
+/** The only place chat usage touches subscription state. */
 @Injectable()
 export class SubscriptionQuotaService extends SubscriptionQuotaPort {
   private readonly logger = new Logger(SubscriptionQuotaService.name);
@@ -31,27 +26,31 @@ export class SubscriptionQuotaService extends SubscriptionQuotaPort {
     const chosen = selectBundleToCharge(candidates, now);
     if (!chosen) return null;
 
-    chosen.messagesUsed += 1;
-    await this.subscriptions.save(chosen, manager);
+    await this.subscriptions.incrementUsage(chosen.id, manager);
 
+    const remainingAfter = chosen.isUnlimited ? null : chosen.remainingMessages - 1;
     this.logger.log(
       `Reserved 1 response from ${chosen.tier} bundle ${chosen.id} for user ${userId} ` +
-        `(${describeRemaining(chosen)} left)`,
+        `(${remainingAfter ?? 'unlimited'} left)`,
     );
 
-    return {
-      subscriptionId: chosen.id,
-      tier: chosen.tier,
-      remainingAfter: chosen.isUnlimited ? null : chosen.remainingMessages,
-    };
+    return { subscriptionId: chosen.id, tier: chosen.tier, remainingAfter };
   }
 
   async releaseOne(subscriptionId: string, manager?: EntityManager): Promise<void> {
     const subscription = await this.subscriptions.findById(subscriptionId, manager);
-    if (!subscription) return;
 
-    subscription.messagesUsed = Math.max(0, subscription.messagesUsed - 1);
-    await this.subscriptions.save(subscription, manager);
+    if (!subscription) {
+      // The reservation was already counted against this bundle, so losing the
+      // refund costs the user a paid response. Never fail silently here.
+      this.logger.error(
+        `Cannot refund bundle ${subscriptionId}: no such subscription. ` +
+          'One response was charged for an answer that was never delivered.',
+      );
+      return;
+    }
+
+    await this.subscriptions.decrementUsage(subscriptionId, manager);
     this.logger.warn(`Released 1 reserved response back to bundle ${subscriptionId}`);
   }
 
@@ -70,8 +69,4 @@ export class SubscriptionQuotaService extends SubscriptionQuotaPort {
         endDate: subscription.endDate,
       }));
   }
-}
-
-function describeRemaining(subscription: Subscription): string {
-  return subscription.isUnlimited ? 'unlimited' : String(subscription.remainingMessages);
 }

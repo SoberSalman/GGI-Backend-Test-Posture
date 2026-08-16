@@ -1,17 +1,25 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { EntityManager, In, LessThanOrEqual, Repository } from 'typeorm';
+import { EntityManager, In, Repository } from 'typeorm';
 import { SubscriptionStatus } from '../domain/bundle-tier';
 import { Subscription } from '../domain/subscription.entity';
 
-/** Serving statuses — a cancelled bundle still runs out its paid period. */
+/** A cancelled bundle still runs out the period it was paid for. */
 const SERVING_STATUSES = [SubscriptionStatus.ACTIVE, SubscriptionStatus.CANCELLED];
 
+export interface RenewalUpdate {
+  startDate: Date;
+  endDate: Date;
+  renewalDate: Date;
+}
+
 /**
- * Persistence adapter for the `Subscription` aggregate.
+ * Persistence for the `Subscription` aggregate.
  *
- * Application services depend on this class, never on `Repository<Subscription>`
- * directly, so query details (locking, ordering, soft state) stay in one place.
+ * Writes are targeted `UPDATE`s, not `save(entity)`. A full-entity save writes
+ * every column from the snapshot the caller read, so the billing job would
+ * silently roll back a `messagesUsed` increment a chat request committed in
+ * between. Each method touches only the columns it owns.
  */
 @Injectable()
 export class SubscriptionRepository {
@@ -24,23 +32,35 @@ export class SubscriptionRepository {
     return manager ? manager.getRepository(Subscription) : this.subscriptions;
   }
 
-  async save(subscription: Subscription, manager?: EntityManager): Promise<Subscription> {
-    return this.scoped(manager).save(subscription);
+  create(data: NewSubscription): Subscription {
+    return this.subscriptions.create(data);
   }
 
-  create(data: Partial<Subscription>): Subscription {
-    return this.subscriptions.create(data);
+  async insert(subscription: Subscription): Promise<Subscription> {
+    return this.subscriptions.save(subscription);
   }
 
   async findById(id: string, manager?: EntityManager): Promise<Subscription | null> {
     return this.scoped(manager).findOne({ where: { id } });
   }
 
-  async findAllForUser(userId: string): Promise<Subscription[]> {
-    return this.subscriptions.find({ where: { userId }, order: { createdAt: 'DESC' } });
+  async findByIdLocked(id: string, manager: EntityManager): Promise<Subscription | null> {
+    return manager
+      .getRepository(Subscription)
+      .createQueryBuilder('subscription')
+      .setLock('pessimistic_write')
+      .where('subscription.id = :id', { id })
+      .getOne();
   }
 
-  /** Bundles that may still serve messages, without locking. Read-only views. */
+  async findAllForUser(userId: string, limit = MAX_BUNDLES_RETURNED): Promise<Subscription[]> {
+    return this.subscriptions.find({
+      where: { userId },
+      order: { createdAt: 'DESC' },
+      take: limit,
+    });
+  }
+
   async findServingForUser(userId: string): Promise<Subscription[]> {
     return this.subscriptions.find({
       where: { userId, status: In(SERVING_STATUSES) },
@@ -49,11 +69,13 @@ export class SubscriptionRepository {
   }
 
   /**
-   * Loads the user's serving bundles with `SELECT ... FOR UPDATE`.
+   * Loads the user's serving bundles `FOR UPDATE`. Must run in a transaction.
    *
-   * Must be called inside a transaction. The row lock is what stops two
-   * concurrent chat requests from both reading `messagesUsed = 9` on a Basic
-   * bundle and each deducting the tenth response.
+   * The lock is what stops two concurrent chat requests both reading
+   * `messagesUsed = 9` on a Basic bundle and each spending the tenth response.
+   * `id` is in the ordering so two transactions take the rows in the same
+   * order. Bundles bought back to back share an `endDate`, and without the
+   * tiebreak Postgres may return them either way round, which deadlocks.
    */
   async findServingForUserLocked(userId: string, manager: EntityManager): Promise<Subscription[]> {
     return manager
@@ -63,25 +85,94 @@ export class SubscriptionRepository {
       .where('subscription.userId = :userId', { userId })
       .andWhere('subscription.status IN (:...statuses)', { statuses: SERVING_STATUSES })
       .orderBy('subscription.endDate', 'ASC')
+      .addOrderBy('subscription.id', 'ASC')
       .getMany();
   }
 
-  /** Active auto-renewing bundles whose renewal date has arrived. */
-  async findDueForRenewal(now: Date): Promise<Subscription[]> {
-    return this.subscriptions.find({
-      where: {
-        status: SubscriptionStatus.ACTIVE,
-        autoRenew: true,
-        renewalDate: LessThanOrEqual(now),
-      },
-      order: { renewalDate: 'ASC' },
-    });
+  /** Spends one response. Atomic, so it cannot lose a concurrent increment. */
+  async incrementUsage(id: string, manager: EntityManager): Promise<void> {
+    await manager.increment(Subscription, { id }, 'messagesUsed', 1);
+  }
+
+  /** Hands one response back, floored at zero. */
+  async decrementUsage(id: string, manager?: EntityManager): Promise<void> {
+    await this.scoped(manager)
+      .createQueryBuilder()
+      .update(Subscription)
+      .set({ messagesUsed: () => 'GREATEST("messagesUsed" - 1, 0)' })
+      .where('id = :id', { id })
+      .execute();
   }
 
   /**
-   * Bundles whose paid period has elapsed and which are therefore no longer
-   * serving. Cancelled bundles land here once their final period closes.
+   * Claims the bundles due for renewal `FOR UPDATE SKIP LOCKED`.
+   *
+   * `SKIP LOCKED` means two overlapping billing runs (the nightly cron racing a
+   * manual trigger) claim disjoint sets instead of both charging the same card.
    */
+  async claimDueForRenewal(now: Date, manager: EntityManager): Promise<Subscription[]> {
+    return manager
+      .getRepository(Subscription)
+      .createQueryBuilder('subscription')
+      .setLock('pessimistic_write')
+      .setOnLocked('skip_locked')
+      .where('subscription.status = :status', { status: SubscriptionStatus.ACTIVE })
+      .andWhere('subscription.autoRenew = true')
+      .andWhere('subscription.renewalDate <= :now', { now })
+      .orderBy('subscription.renewalDate', 'ASC')
+      .addOrderBy('subscription.id', 'ASC')
+      .getMany();
+  }
+
+  /** Rolls the period forward. Leaves `messagesUsed` to `resetUsage`. */
+  async applyRenewal(id: string, update: RenewalUpdate, manager: EntityManager): Promise<void> {
+    await manager
+      .getRepository(Subscription)
+      .createQueryBuilder()
+      .update(Subscription)
+      .set({
+        startDate: update.startDate,
+        endDate: update.endDate,
+        renewalDate: update.renewalDate,
+        messagesUsed: 0,
+        renewalCount: () => '"renewalCount" + 1',
+        lastPaymentFailureReason: null,
+      })
+      .where('id = :id', { id })
+      .execute();
+  }
+
+  async applyPaymentFailure(id: string, reason: string, manager: EntityManager): Promise<void> {
+    await manager.getRepository(Subscription).update(
+      { id },
+      {
+        status: SubscriptionStatus.INACTIVE,
+        renewalDate: null,
+        lastPaymentFailureReason: reason,
+      },
+    );
+  }
+
+  async applyCancellation(id: string, cancelledAt: Date): Promise<void> {
+    await this.subscriptions.update(
+      { id, status: SubscriptionStatus.ACTIVE },
+      {
+        status: SubscriptionStatus.CANCELLED,
+        autoRenew: false,
+        renewalDate: null,
+        cancelledAt,
+      },
+    );
+  }
+
+  async applyAutoRenew(id: string, autoRenew: boolean, renewalDate: Date | null): Promise<void> {
+    await this.subscriptions.update(
+      { id, status: SubscriptionStatus.ACTIVE },
+      { autoRenew, renewalDate },
+    );
+  }
+
+  /** Bundles whose paid period closed without renewing. */
   async findLapsed(now: Date): Promise<Subscription[]> {
     return this.subscriptions
       .createQueryBuilder('subscription')
@@ -91,12 +182,31 @@ export class SubscriptionRepository {
       .getMany();
   }
 
-  async markExpired(ids: readonly string[]): Promise<number> {
+  /**
+   * The status guard matters: a bundle renewed between the `findLapsed` read
+   * and this write must not be force-expired on the strength of a stale row.
+   */
+  async markExpired(ids: readonly string[], now: Date): Promise<number> {
     if (ids.length === 0) return 0;
-    const result = await this.subscriptions.update(
-      { id: In([...ids]) },
-      { status: SubscriptionStatus.EXPIRED, renewalDate: null },
-    );
+
+    const result = await this.subscriptions
+      .createQueryBuilder()
+      .update(Subscription)
+      .set({ status: SubscriptionStatus.EXPIRED, renewalDate: null })
+      .where('id IN (:...ids)', { ids: [...ids] })
+      .andWhere('status IN (:...statuses)', { statuses: SERVING_STATUSES })
+      .andWhere('"endDate" <= :now', { now })
+      .execute();
+
     return result.affected ?? 0;
   }
 }
+
+export type NewSubscription = Omit<
+  Subscription,
+  'id' | 'createdAt' | 'updatedAt' | 'user' | 'remainingMessages' | 'isUnlimited' | keyof Behaviour
+>;
+
+type Behaviour = Pick<Subscription, 'isWithinPeriod' | 'canServe' | 'isDueForRenewal'>;
+
+const MAX_BUNDLES_RETURNED = 100;

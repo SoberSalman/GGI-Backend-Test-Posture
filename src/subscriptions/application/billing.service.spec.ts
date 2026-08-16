@@ -1,4 +1,5 @@
 import { Test } from '@nestjs/testing';
+import { DataSource, EntityManager } from 'typeorm';
 import { Clock, FixedClock } from '../../shared/time/clock';
 import {
   BillingCycle,
@@ -44,19 +45,26 @@ describe('BillingService', () => {
 
   beforeEach(async () => {
     subscriptions = {
-      findDueForRenewal: jest.fn().mockResolvedValue([]),
+      claimDueForRenewal: jest.fn().mockResolvedValue([]),
+      findByIdLocked: jest.fn().mockResolvedValue(null),
+      applyRenewal: jest.fn().mockResolvedValue(undefined),
+      applyPaymentFailure: jest.fn().mockResolvedValue(undefined),
       findLapsed: jest.fn().mockResolvedValue([]),
       markExpired: jest.fn().mockResolvedValue(0),
-      save: jest.fn().mockImplementation((s: Subscription) => Promise.resolve(s)),
     } as unknown as jest.Mocked<SubscriptionRepository>;
 
     payments = {
       record: jest.fn().mockResolvedValue({}),
     } as unknown as jest.Mocked<PaymentRepository>;
 
-    gateway = {
-      charge: jest.fn().mockResolvedValue({ outcome: 'SUCCEEDED', reference: 'sim_1' }),
-    };
+    gateway = { charge: jest.fn() };
+    gateway.charge.mockResolvedValue({ outcome: 'SUCCEEDED', reference: 'sim_1' });
+
+    const dataSource = {
+      transaction: jest.fn((work: (manager: EntityManager) => Promise<unknown>) =>
+        work({} as EntityManager),
+      ),
+    } as unknown as DataSource;
 
     const moduleRef = await Test.createTestingModule({
       providers: [
@@ -64,12 +72,21 @@ describe('BillingService', () => {
         { provide: SubscriptionRepository, useValue: subscriptions },
         { provide: PaymentRepository, useValue: payments },
         { provide: PaymentGateway, useValue: gateway },
+        { provide: DataSource, useValue: dataSource },
         { provide: Clock, useValue: new FixedClock(NOW) },
       ],
     }).compile();
 
     service = moduleRef.get(BillingService);
   });
+
+  /** Claimed rows are re-read under a lock before being charged. */
+  function queue(...bundles: Subscription[]): void {
+    subscriptions.claimDueForRenewal.mockResolvedValue(bundles);
+    subscriptions.findByIdLocked.mockImplementation((id: string) =>
+      Promise.resolve(bundles.find((bundle) => bundle.id === id) ?? null),
+    );
+  }
 
   it('does nothing when no bundle is due', async () => {
     const report = await service.runBillingCycle();
@@ -80,54 +97,59 @@ describe('BillingService', () => {
 
   describe('successful renewal', () => {
     it('rolls the period forward from the previous end date', async () => {
-      const bundle = dueBundle();
-      subscriptions.findDueForRenewal.mockResolvedValue([bundle]);
+      queue(dueBundle());
 
       await service.runBillingCycle();
 
-      expect(bundle.startDate.toISOString()).toBe('2026-09-01T00:00:00.000Z');
-      expect(bundle.endDate.toISOString()).toBe('2026-10-01T00:00:00.000Z');
-      expect(bundle.renewalDate?.toISOString()).toBe('2026-10-01T00:00:00.000Z');
+      expect(subscriptions.applyRenewal).toHaveBeenCalledWith(
+        'sub-1',
+        {
+          startDate: new Date('2026-09-01T00:00:00Z'),
+          endDate: new Date('2026-10-01T00:00:00Z'),
+          renewalDate: new Date('2026-10-01T00:00:00Z'),
+        },
+        expect.anything(),
+      );
     });
 
-    it('resets the period message counter and records the charge', async () => {
-      const bundle = dueBundle({ messagesUsed: 87 });
-      subscriptions.findDueForRenewal.mockResolvedValue([bundle]);
+    it('records the charge and reports the renewal', async () => {
+      queue(dueBundle());
 
       const report = await service.runBillingCycle();
 
-      expect(bundle.messagesUsed).toBe(0);
-      expect(bundle.renewalCount).toBe(1);
-      expect(bundle.status).toBe(SubscriptionStatus.ACTIVE);
       expect(payments.record).toHaveBeenCalledWith(
         expect.objectContaining({
           kind: PaymentKind.RENEWAL,
           status: PaymentStatus.SUCCEEDED,
           amountCents: 2999,
         }),
+        expect.anything(),
       );
       expect(report).toMatchObject({ processed: 1, renewed: 1, failed: 0 });
     });
 
     it('advances a yearly bundle by a year', async () => {
-      const bundle = dueBundle({
-        billingCycle: BillingCycle.YEARLY,
-        endDate: new Date('2026-09-01T00:00:00Z'),
-      });
-      subscriptions.findDueForRenewal.mockResolvedValue([bundle]);
+      queue(dueBundle({ billingCycle: BillingCycle.YEARLY }));
 
       await service.runBillingCycle();
 
-      expect(bundle.endDate.toISOString()).toBe('2027-09-01T00:00:00.000Z');
+      expect(subscriptions.applyRenewal).toHaveBeenCalledWith(
+        'sub-1',
+        expect.objectContaining({ endDate: new Date('2027-09-01T00:00:00Z') }),
+        expect.anything(),
+      );
     });
 
-    it('clears a previous failure reason', async () => {
-      const bundle = dueBundle({ lastPaymentFailureReason: 'card_expired' });
-      subscriptions.findDueForRenewal.mockResolvedValue([bundle]);
+    it('writes the payment and the period advance in one transaction', async () => {
+      queue(dueBundle());
 
       await service.runBillingCycle();
 
-      expect(bundle.lastPaymentFailureReason).toBeNull();
+      // Both must share a manager. A payment committed without the matching
+      // period advance leaves the bundle due, and the card gets charged again.
+      const paymentManager = payments.record.mock.calls[0][1];
+      const renewalManager = subscriptions.applyRenewal.mock.calls[0][2];
+      expect(paymentManager).toBe(renewalManager);
     });
   });
 
@@ -136,67 +158,95 @@ describe('BillingService', () => {
       gateway.charge.mockResolvedValue({ outcome: 'FAILED', reason: 'insufficient_funds' });
     });
 
-    it('marks the bundle inactive and disarms renewal', async () => {
-      const bundle = dueBundle();
-      subscriptions.findDueForRenewal.mockResolvedValue([bundle]);
+    it('marks the bundle inactive with the decline reason', async () => {
+      queue(dueBundle());
 
       const report = await service.runBillingCycle();
 
-      expect(bundle.status).toBe(SubscriptionStatus.INACTIVE);
-      expect(bundle.renewalDate).toBeNull();
-      expect(bundle.lastPaymentFailureReason).toBe('insufficient_funds');
+      expect(subscriptions.applyPaymentFailure).toHaveBeenCalledWith(
+        'sub-1',
+        'insufficient_funds',
+        expect.anything(),
+      );
+      expect(subscriptions.applyRenewal).not.toHaveBeenCalled();
       expect(report).toMatchObject({ processed: 1, renewed: 0, failed: 1 });
     });
 
-    it('does not extend the period or reset usage', async () => {
-      const bundle = dueBundle({ messagesUsed: 87 });
-      subscriptions.findDueForRenewal.mockResolvedValue([bundle]);
-
-      await service.runBillingCycle();
-
-      expect(bundle.endDate.toISOString()).toBe('2026-09-01T00:00:00.000Z');
-      expect(bundle.messagesUsed).toBe(87);
-    });
-
     it('records the failed charge with its reason', async () => {
-      subscriptions.findDueForRenewal.mockResolvedValue([dueBundle()]);
+      queue(dueBundle());
 
       await service.runBillingCycle();
 
       expect(payments.record).toHaveBeenCalledWith(
         expect.objectContaining({
-          kind: PaymentKind.RENEWAL,
           status: PaymentStatus.FAILED,
           failureReason: 'insufficient_funds',
         }),
+        expect.anything(),
       );
     });
   });
 
-  it('processes every due bundle independently', async () => {
-    gateway.charge
-      .mockResolvedValueOnce({ outcome: 'SUCCEEDED', reference: 'sim_1' })
-      .mockResolvedValueOnce({ outcome: 'FAILED', reason: 'card_expired' });
-    subscriptions.findDueForRenewal.mockResolvedValue([
-      dueBundle({ id: 'sub-1' }),
-      dueBundle({ id: 'sub-2' }),
-    ]);
+  describe('overlapping runs', () => {
+    it('skips a bundle another run already renewed', async () => {
+      subscriptions.claimDueForRenewal.mockResolvedValue([dueBundle()]);
+      // Re-read under the lock: the renewal date has already moved forward.
+      subscriptions.findByIdLocked.mockResolvedValue(
+        dueBundle({ renewalDate: new Date('2026-10-01T00:00:00Z') }),
+      );
 
-    const report = await service.runBillingCycle();
+      const report = await service.runBillingCycle();
 
-    expect(report).toMatchObject({ processed: 2, renewed: 1, failed: 1 });
-    expect(report.outcomes.map((o) => o.result)).toEqual(['RENEWED', 'PAYMENT_FAILED']);
+      expect(gateway.charge).not.toHaveBeenCalled();
+      expect(payments.record).not.toHaveBeenCalled();
+      expect(report.outcomes[0].result).toBe('SKIPPED');
+      expect(report.renewed).toBe(0);
+    });
+
+    it('skips a bundle that vanished between claim and lock', async () => {
+      subscriptions.claimDueForRenewal.mockResolvedValue([dueBundle()]);
+      subscriptions.findByIdLocked.mockResolvedValue(null);
+
+      const report = await service.runBillingCycle();
+
+      expect(gateway.charge).not.toHaveBeenCalled();
+      expect(report.outcomes[0].result).toBe('SKIPPED');
+    });
+  });
+
+  describe('partial failure', () => {
+    it('keeps processing after one bundle throws', async () => {
+      queue(dueBundle({ id: 'sub-1' }), dueBundle({ id: 'sub-2' }));
+      gateway.charge
+        .mockRejectedValueOnce(new Error('connection reset'))
+        .mockResolvedValueOnce({ outcome: 'SUCCEEDED', reference: 'sim_2' });
+
+      const report = await service.runBillingCycle();
+
+      expect(report).toMatchObject({ processed: 2, renewed: 1, errored: 1 });
+      expect(report.outcomes.map((outcome) => outcome.result)).toEqual(['ERROR', 'RENEWED']);
+    });
+
+    it('still expires lapsed bundles when a renewal throws', async () => {
+      queue(dueBundle());
+      gateway.charge.mockRejectedValue(new Error('gateway unreachable'));
+      subscriptions.findLapsed.mockResolvedValue([dueBundle({ id: 'lapsed-1' })]);
+      subscriptions.markExpired.mockResolvedValue(1);
+
+      const report = await service.runBillingCycle();
+
+      expect(subscriptions.markExpired).toHaveBeenCalledWith(['lapsed-1'], NOW);
+      expect(report.expired).toBe(1);
+    });
   });
 
   it('expires bundles whose paid period has closed', async () => {
-    subscriptions.findLapsed.mockResolvedValue([
-      dueBundle({ id: 'lapsed-1', autoRenew: false, renewalDate: null }),
-    ]);
+    subscriptions.findLapsed.mockResolvedValue([dueBundle({ id: 'lapsed-1' })]);
     subscriptions.markExpired.mockResolvedValue(1);
 
     const report = await service.runBillingCycle();
 
-    expect(subscriptions.markExpired).toHaveBeenCalledWith(['lapsed-1']);
+    expect(subscriptions.markExpired).toHaveBeenCalledWith(['lapsed-1'], NOW);
     expect(report.expired).toBe(1);
   });
 });

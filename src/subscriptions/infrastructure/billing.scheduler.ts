@@ -6,9 +6,9 @@ import { BillingService } from '../application/billing.service';
 /**
  * Runs the billing cycle nightly.
  *
- * ponytail: single-process cron. Running more than one instance would double
- * charge — move to a queue with a distributed lock (BullMQ / pg advisory lock)
- * before scaling out.
+ * Single-process cron. Two instances would both fire, though the renewal
+ * path's SKIP LOCKED claim and dueness re-check make that safe rather than
+ * double-charging; a proper job queue is still the right answer at scale.
  */
 @Injectable()
 export class BillingScheduler {
@@ -33,7 +33,7 @@ export class BillingScheduler {
           `${report.expired} expired`,
       );
     } catch (error) {
-      // A crash here must not take the scheduler down — the next run retries.
+      // A crash here must not take the scheduler down, the next run retries.
       this.logger.error('Nightly billing run failed', error instanceof Error ? error.stack : error);
     }
   }

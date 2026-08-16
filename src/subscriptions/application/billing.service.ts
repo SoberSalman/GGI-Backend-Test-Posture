@@ -1,6 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { DataSource, EntityManager } from 'typeorm';
 import { Clock } from '../../shared/time/clock';
-import { SubscriptionStatus } from '../domain/bundle-tier';
 import { PaymentKind, PaymentStatus } from '../domain/payment.entity';
 import { Subscription } from '../domain/subscription.entity';
 import { PaymentRepository } from '../infrastructure/payment.repository';
@@ -12,9 +12,8 @@ export interface RenewalOutcome {
   subscriptionId: string;
   userId: string;
   tier: string;
-  result: 'RENEWED' | 'PAYMENT_FAILED';
+  result: 'RENEWED' | 'PAYMENT_FAILED' | 'SKIPPED' | 'ERROR';
   reason?: string;
-  /** New end of the paid period, when the charge went through. */
   nextEndDate?: Date;
 }
 
@@ -23,16 +22,14 @@ export interface BillingRunReport {
   processed: number;
   renewed: number;
   failed: number;
+  errored: number;
   expired: number;
   outcomes: RenewalOutcome[];
 }
 
 /**
- * Simulated billing run: charges every bundle whose renewal date has arrived,
- * then retires bundles whose paid period has closed.
- *
- * Invoked by the nightly cron and by `POST /billing/run` so a reviewer can
- * trigger it on demand instead of waiting for the schedule.
+ * Charges bundles whose renewal date has arrived, then retires the ones whose
+ * paid period closed. Runs nightly on a cron and on demand via POST /billing/run.
  */
 @Injectable()
 export class BillingService {
@@ -42,18 +39,36 @@ export class BillingService {
     private readonly subscriptions: SubscriptionRepository,
     private readonly payments: PaymentRepository,
     private readonly gateway: PaymentGateway,
+    private readonly dataSource: DataSource,
     private readonly clock: Clock,
   ) {}
 
   async runBillingCycle(): Promise<BillingRunReport> {
     const runAt = this.clock.now();
-    const due = await this.subscriptions.findDueForRenewal(runAt);
+    const due = await this.dataSource.transaction((manager) =>
+      this.subscriptions.claimDueForRenewal(runAt, manager),
+    );
 
     this.logger.log(`Billing run at ${runAt.toISOString()}: ${due.length} subscription(s) due`);
 
     const outcomes: RenewalOutcome[] = [];
     for (const subscription of due) {
-      outcomes.push(await this.renewOne(subscription));
+      // One bad row must not abort the batch or skip the expiry sweep below.
+      // A blip on somebody else's bundle should never leave lapsed bundles
+      // serving for another day.
+      try {
+        outcomes.push(await this.renewOne(subscription.id, runAt));
+      } catch (error) {
+        const reason = error instanceof Error ? error.message : String(error);
+        this.logger.error(`Renewal failed for ${subscription.id}: ${reason}`);
+        outcomes.push({
+          subscriptionId: subscription.id,
+          userId: subscription.userId,
+          tier: subscription.tier,
+          result: 'ERROR',
+          reason,
+        });
+      }
     }
 
     const expired = await this.expireLapsed(runAt);
@@ -61,54 +76,76 @@ export class BillingService {
     return {
       runAt,
       processed: outcomes.length,
-      renewed: outcomes.filter((outcome) => outcome.result === 'RENEWED').length,
-      failed: outcomes.filter((outcome) => outcome.result === 'PAYMENT_FAILED').length,
+      renewed: countBy(outcomes, 'RENEWED'),
+      failed: countBy(outcomes, 'PAYMENT_FAILED'),
+      errored: countBy(outcomes, 'ERROR'),
       expired,
       outcomes,
     };
   }
 
   /**
-   * Charges one bundle and applies the result.
+   * Charges one bundle and applies the result in a single transaction.
    *
-   * Success rolls the period forward and resets the period's message counter.
-   * A decline marks the bundle INACTIVE — it stops serving immediately and is
-   * not retried, and the reason is kept on the record and in payment history.
+   * The row is re-read under a lock and re-checked for dueness: if an
+   * overlapping run already renewed it, the renewal date has moved and this run
+   * skips it rather than charging twice. Writing the payment and the period
+   * advance in one transaction closes the other half of that hole, where a
+   * crash between the two left the bundle due with the money already taken.
+   *
+   * ponytail: the charge happens inside the transaction, so a row lock is held
+   * across the provider call. Fine for a simulated gateway; a real PSP needs an
+   * idempotency key and an outbox so the lock can be released first.
    */
-  private async renewOne(subscription: Subscription): Promise<RenewalOutcome> {
-    const charge = await this.gateway.charge({
-      userId: subscription.userId,
-      subscriptionId: subscription.id,
-      amountCents: subscription.priceCents,
-      description: `${subscription.tier} bundle renewal (${subscription.billingCycle})`,
-    });
+  private async renewOne(subscriptionId: string, runAt: Date): Promise<RenewalOutcome> {
+    return this.dataSource.transaction(async (manager) => {
+      const subscription = await this.subscriptions.findByIdLocked(subscriptionId, manager);
 
-    await this.payments.record({
-      subscriptionId: subscription.id,
-      userId: subscription.userId,
-      kind: PaymentKind.RENEWAL,
-      status: charge.outcome === 'SUCCEEDED' ? PaymentStatus.SUCCEEDED : PaymentStatus.FAILED,
-      amountCents: subscription.priceCents,
-      failureReason: charge.outcome === 'FAILED' ? charge.reason : null,
-    });
+      if (!subscription?.isDueForRenewal(runAt)) {
+        this.logger.log(`Skipping ${subscriptionId}: no longer due (claimed by another run)`);
+        return {
+          subscriptionId,
+          userId: subscription?.userId ?? 'unknown',
+          tier: subscription?.tier ?? 'unknown',
+          result: 'SKIPPED' as const,
+          reason: 'not_due',
+        };
+      }
 
-    return charge.outcome === 'FAILED'
-      ? this.applyDecline(subscription, charge.reason)
-      : this.applyRenewal(subscription);
+      const charge = await this.gateway.charge({
+        userId: subscription.userId,
+        subscriptionId: subscription.id,
+        amountCents: subscription.priceCents,
+        description: `${subscription.tier} bundle renewal (${subscription.billingCycle})`,
+      });
+
+      await this.payments.record(
+        {
+          subscriptionId: subscription.id,
+          userId: subscription.userId,
+          kind: PaymentKind.RENEWAL,
+          status: charge.outcome === 'SUCCEEDED' ? PaymentStatus.SUCCEEDED : PaymentStatus.FAILED,
+          amountCents: subscription.priceCents,
+          failureReason: charge.outcome === 'FAILED' ? charge.reason : null,
+        },
+        manager,
+      );
+
+      return charge.outcome === 'FAILED'
+        ? this.applyDecline(subscription, charge.reason, manager)
+        : this.applyRenewal(subscription, manager);
+    });
   }
 
-  /**
-   * A decline stops the bundle serving immediately and is not retried. The
-   * reason stays on the record so support can explain it without digging
-   * through payment history.
-   */
-  private async applyDecline(subscription: Subscription, reason: string): Promise<RenewalOutcome> {
-    subscription.status = SubscriptionStatus.INACTIVE;
-    subscription.renewalDate = null;
-    subscription.lastPaymentFailureReason = reason;
-    await this.subscriptions.save(subscription);
-
+  /** A decline stops the bundle serving at once and is not retried. */
+  private async applyDecline(
+    subscription: Subscription,
+    reason: string,
+    manager: EntityManager,
+  ): Promise<RenewalOutcome> {
+    await this.subscriptions.applyPaymentFailure(subscription.id, reason, manager);
     this.logger.warn(`Bundle ${subscription.id} marked INACTIVE: payment ${reason}`);
+
     return {
       subscriptionId: subscription.id,
       userId: subscription.userId,
@@ -118,38 +155,44 @@ export class BillingService {
     };
   }
 
-  /** Rolls the period forward and starts the new period's quota at zero. */
-  private async applyRenewal(subscription: Subscription): Promise<RenewalOutcome> {
+  private async applyRenewal(
+    subscription: Subscription,
+    manager: EntityManager,
+  ): Promise<RenewalOutcome> {
     // The new period starts where the old one ended, so repeated renewals never
     // drift away from the original anniversary date.
-    const previousEnd = subscription.endDate;
-    subscription.startDate = previousEnd;
-    subscription.endDate = addBillingCycle(previousEnd, subscription.billingCycle);
-    subscription.renewalDate = subscription.endDate;
-    subscription.messagesUsed = 0;
-    subscription.renewalCount += 1;
-    subscription.lastPaymentFailureReason = null;
-    await this.subscriptions.save(subscription);
+    const startDate = subscription.endDate;
+    const endDate = addBillingCycle(startDate, subscription.billingCycle);
 
-    this.logger.log(
-      `Bundle ${subscription.id} renewed through ${subscription.endDate.toISOString()}`,
+    await this.subscriptions.applyRenewal(
+      subscription.id,
+      { startDate, endDate, renewalDate: endDate },
+      manager,
     );
+
+    this.logger.log(`Bundle ${subscription.id} renewed through ${endDate.toISOString()}`);
     return {
       subscriptionId: subscription.id,
       userId: subscription.userId,
       tier: subscription.tier,
       result: 'RENEWED',
-      nextEndDate: subscription.endDate,
+      nextEndDate: endDate,
     };
   }
 
-  /** Retires bundles that ran past their paid period without renewing. */
   private async expireLapsed(now: Date): Promise<number> {
     const lapsed = await this.subscriptions.findLapsed(now);
     if (lapsed.length === 0) return 0;
 
-    const count = await this.subscriptions.markExpired(lapsed.map((s) => s.id));
+    const count = await this.subscriptions.markExpired(
+      lapsed.map((subscription) => subscription.id),
+      now,
+    );
     this.logger.log(`Expired ${count} lapsed subscription(s)`);
     return count;
   }
+}
+
+function countBy(outcomes: readonly RenewalOutcome[], result: RenewalOutcome['result']): number {
+  return outcomes.filter((outcome) => outcome.result === result).length;
 }

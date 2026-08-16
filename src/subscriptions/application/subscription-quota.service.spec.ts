@@ -1,3 +1,4 @@
+import { Logger } from '@nestjs/common';
 import { EntityManager } from 'typeorm';
 import { BillingCycle, BundleTier, SubscriptionStatus } from '../domain/bundle-tier';
 import { Subscription } from '../domain/subscription.entity';
@@ -37,26 +38,27 @@ describe('SubscriptionQuotaService', () => {
       findServingForUserLocked: jest.fn().mockResolvedValue([]),
       findServingForUser: jest.fn().mockResolvedValue([]),
       findById: jest.fn().mockResolvedValue(null),
-      save: jest.fn().mockImplementation((s: Subscription) => Promise.resolve(s)),
+      incrementUsage: jest.fn().mockResolvedValue(undefined),
+      decrementUsage: jest.fn().mockResolvedValue(undefined),
     } as unknown as jest.Mocked<SubscriptionRepository>;
 
     service = new SubscriptionQuotaService(repository);
   });
 
   describe('reserveOne', () => {
-    it('increments the chosen bundle and reports what is left', async () => {
-      const chosen = bundle({ messagesUsed: 3 });
-      repository.findServingForUserLocked.mockResolvedValue([chosen]);
+    it('increments the chosen bundle atomically and reports what is left', async () => {
+      repository.findServingForUserLocked.mockResolvedValue([bundle({ messagesUsed: 3 })]);
 
       const reservation = await service.reserveOne('user-1', NOW, MANAGER);
 
-      expect(chosen.messagesUsed).toBe(4);
       expect(reservation).toEqual({
         subscriptionId: 'sub-1',
         tier: BundleTier.BASIC,
         remainingAfter: 6,
       });
-      expect(repository.save).toHaveBeenCalledWith(chosen, MANAGER);
+      // An atomic UPDATE, not a read-modify-write of the whole entity: the
+      // billing job writes the same row without holding this lock.
+      expect(repository.incrementUsage).toHaveBeenCalledWith('sub-1', MANAGER);
     });
 
     it('reports null remaining for an unlimited bundle', async () => {
@@ -73,10 +75,10 @@ describe('SubscriptionQuotaService', () => {
       repository.findServingForUserLocked.mockResolvedValue([bundle({ messagesUsed: 10 })]);
 
       await expect(service.reserveOne('user-1', NOW, MANAGER)).resolves.toBeNull();
-      expect(repository.save).not.toHaveBeenCalled();
+      expect(repository.incrementUsage).not.toHaveBeenCalled();
     });
 
-    it('takes a row lock — the whole point of reserving inside a transaction', async () => {
+    it('takes a row lock, the whole point of reserving inside a transaction', async () => {
       await service.reserveOne('user-1', NOW, MANAGER);
 
       expect(repository.findServingForUserLocked).toHaveBeenCalledWith('user-1', MANAGER);
@@ -85,26 +87,22 @@ describe('SubscriptionQuotaService', () => {
 
   describe('releaseOne', () => {
     it('decrements the bundle it was reserved from', async () => {
-      const target = bundle({ messagesUsed: 4 });
-      repository.findById.mockResolvedValue(target);
+      repository.findById.mockResolvedValue(bundle({ messagesUsed: 4 }));
 
       await service.releaseOne('sub-1');
 
-      expect(target.messagesUsed).toBe(3);
+      expect(repository.decrementUsage).toHaveBeenCalledWith('sub-1', undefined);
     });
 
-    it('never drops usage below zero', async () => {
-      const target = bundle({ messagesUsed: 0 });
-      repository.findById.mockResolvedValue(target);
+    it('logs rather than silently dropping a refund for an unknown bundle', async () => {
+      const logged = jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
 
-      await service.releaseOne('sub-1');
-
-      expect(target.messagesUsed).toBe(0);
-    });
-
-    it('is a no-op for an unknown bundle', async () => {
       await service.releaseOne('missing');
-      expect(repository.save).not.toHaveBeenCalled();
+
+      // The reservation was already charged, so a lost refund costs the user a
+      // paid response. It must never be invisible.
+      expect(repository.decrementUsage).not.toHaveBeenCalled();
+      expect(logged).toHaveBeenCalledWith(expect.stringContaining('missing'));
     });
   });
 

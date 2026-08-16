@@ -40,11 +40,13 @@ describe('SubscriptionService', () => {
         .mockImplementation((data: Partial<Subscription>) =>
           Object.assign(new Subscription(), data),
         ),
-      save: jest
+      insert: jest
         .fn()
         .mockImplementation((s: Subscription) =>
           Promise.resolve(Object.assign(s, { id: 'sub-1' })),
         ),
+      applyCancellation: jest.fn().mockResolvedValue(undefined),
+      applyAutoRenew: jest.fn().mockResolvedValue(undefined),
       findById: jest.fn().mockResolvedValue(stored),
       findAllForUser: jest.fn().mockResolvedValue([stored]),
     } as unknown as jest.Mocked<SubscriptionRepository>;
@@ -159,20 +161,19 @@ describe('SubscriptionService', () => {
   });
 
   describe('cancel', () => {
-    it('stops renewal but keeps the bundle usable until the period ends', async () => {
-      const cancelled = await service.cancel('sub-1', 'user-1');
+    it('stops renewal without shortening the paid period', async () => {
+      await service.cancel('sub-1', 'user-1');
 
-      expect(cancelled.status).toBe(SubscriptionStatus.CANCELLED);
-      expect(cancelled.autoRenew).toBe(false);
-      expect(cancelled.renewalDate).toBeNull();
-      expect(cancelled.cancelledAt).toEqual(NOW);
-      expect(cancelled.endDate.toISOString()).toBe('2026-09-16T12:00:00.000Z');
-      expect(cancelled.canServe(NOW)).toBe(true);
+      expect(subscriptions.applyCancellation).toHaveBeenCalledWith('sub-1', NOW);
+      // endDate is not among the columns the update touches, so the bundle
+      // keeps serving out the period the user already paid for.
+      const [, updated] = subscriptions.applyCancellation.mock.calls[0];
+      expect(updated).toEqual(NOW);
     });
 
-    it('preserves usage history', async () => {
-      const cancelled = await service.cancel('sub-1', 'user-1');
-      expect(cancelled.messagesUsed).toBe(4);
+    it('leaves usage history untouched', async () => {
+      await service.cancel('sub-1', 'user-1');
+      expect(stored.messagesUsed).toBe(4);
     });
 
     it('refuses to cancel twice', async () => {
@@ -187,19 +188,18 @@ describe('SubscriptionService', () => {
 
   describe('setAutoRenew', () => {
     it('clears the renewal date when switched off', async () => {
-      const updated = await service.setAutoRenew('sub-1', 'user-1', false);
+      await service.setAutoRenew('sub-1', 'user-1', false);
 
-      expect(updated.autoRenew).toBe(false);
-      expect(updated.renewalDate).toBeNull();
+      expect(subscriptions.applyAutoRenew).toHaveBeenCalledWith('sub-1', false, null);
     });
 
     it('re-arms the renewal date to the end of the period when switched on', async () => {
       stored.autoRenew = false;
       stored.renewalDate = null;
 
-      const updated = await service.setAutoRenew('sub-1', 'user-1', true);
+      await service.setAutoRenew('sub-1', 'user-1', true);
 
-      expect(updated.renewalDate?.toISOString()).toBe(stored.endDate.toISOString());
+      expect(subscriptions.applyAutoRenew).toHaveBeenCalledWith('sub-1', true, stored.endDate);
     });
 
     it('refuses on a bundle that is not active', async () => {

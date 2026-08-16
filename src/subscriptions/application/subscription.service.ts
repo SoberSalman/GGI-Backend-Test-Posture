@@ -35,19 +35,13 @@ export class SubscriptionService {
     private readonly clock: Clock,
   ) {}
 
-  /**
-   * Purchases a bundle.
-   *
-   * The initial charge always succeeds — random payment failure is scoped to
-   * auto-renewal (per the brief), which keeps setting up test data
-   * deterministic. The charge is still recorded so billing history is complete.
-   */
+  /** The initial charge always succeeds; random failure is scoped to renewals. */
   async create(command: CreateSubscriptionCommand): Promise<Subscription> {
     const now = this.clock.now();
     const definition = tierDefinition(command.tier);
     const endDate = addBillingCycle(now, command.billingCycle);
 
-    const subscription = await this.subscriptions.save(
+    const subscription = await this.subscriptions.insert(
       this.subscriptions.create({
         userId: command.userId,
         tier: command.tier,
@@ -97,10 +91,7 @@ export class SubscriptionService {
     return this.payments.findForSubscription(subscriptionId);
   }
 
-  /**
-   * Turns auto-renew on or off. Switching it on re-arms the renewal date to the
-   * end of the current period; switching it off clears it.
-   */
+  /** Switching auto-renew on re-arms the renewal date to the end of the period. */
   async setAutoRenew(
     subscriptionId: string,
     userId: string,
@@ -116,17 +107,18 @@ export class SubscriptionService {
       );
     }
 
-    subscription.autoRenew = autoRenew;
-    subscription.renewalDate = autoRenew ? subscription.endDate : null;
-    return this.subscriptions.save(subscription);
+    await this.subscriptions.applyAutoRenew(
+      subscriptionId,
+      autoRenew,
+      autoRenew ? subscription.endDate : null,
+    );
+    return this.getOwned(subscriptionId, userId);
   }
 
   /**
-   * Cancels a bundle.
-   *
    * The user keeps what they paid for: the bundle stays servable until
-   * `endDate`, renewal is disarmed, and no usage or payment history is touched.
-   * The expiry sweep flips it to EXPIRED once the period closes.
+   * `endDate` and no usage or payment history is touched. The expiry sweep
+   * flips it to EXPIRED once the period closes.
    */
   async cancel(subscriptionId: string, userId: string): Promise<Subscription> {
     const subscription = await this.getOwned(subscriptionId, userId);
@@ -135,19 +127,15 @@ export class SubscriptionService {
       throw new InvalidSubscriptionStateError(subscriptionId, subscription.status, 'cancel');
     }
 
-    subscription.status = SubscriptionStatus.CANCELLED;
-    subscription.autoRenew = false;
-    subscription.renewalDate = null;
-    subscription.cancelledAt = this.clock.now();
+    await this.subscriptions.applyCancellation(subscriptionId, this.clock.now());
 
     this.logger.log(
-      `Bundle ${subscriptionId} cancelled; remains usable until ${subscription.endDate.toISOString()}`,
+      `Bundle ${subscriptionId} cancelled; usable until ${subscription.endDate.toISOString()}`,
     );
-    return this.subscriptions.save(subscription);
+    return this.getOwned(subscriptionId, userId);
   }
 }
 
-/** Advances a date by one billing cycle. */
 export function addBillingCycle(from: Date, cycle: BillingCycle): Date {
   return cycle === BillingCycle.YEARLY ? addYearsUtc(from, 1) : addMonthsUtc(from, 1);
 }

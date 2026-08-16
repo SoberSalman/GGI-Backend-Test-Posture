@@ -25,7 +25,6 @@ export class Subscription {
   id!: string;
 
   @Column({ type: 'uuid' })
-  @Index()
   userId!: string;
 
   @ManyToOne(() => User, { onDelete: 'CASCADE' })
@@ -46,15 +45,12 @@ export class Subscription {
   })
   status!: SubscriptionStatus;
 
-  /** Responses included per billing period. `null` means unlimited. */
   @Column({ type: 'int', nullable: true })
   maxMessages!: number | null;
 
-  /** Responses consumed in the current billing period. */
   @Column({ type: 'int', default: 0 })
   messagesUsed!: number;
 
-  /** Price in minor units (cents) charged each cycle. */
   @Column({ type: 'int' })
   priceCents!: number;
 
@@ -78,7 +74,6 @@ export class Subscription {
   @Column({ type: 'timestamptz', nullable: true })
   cancelledAt!: Date | null;
 
-  /** Number of successful renewal charges so far. */
   @Column({ type: 'int', default: 0 })
   renewalCount!: number;
 
@@ -91,11 +86,6 @@ export class Subscription {
   @UpdateDateColumn({ type: 'timestamptz' })
   updatedAt!: Date;
 
-  // ---------------------------------------------------------------------------
-  // Domain behaviour
-  // ---------------------------------------------------------------------------
-
-  /** Responses left this period. `Infinity` for unlimited tiers. */
   get remainingMessages(): number {
     if (isUnlimited(this.maxMessages)) return Number.POSITIVE_INFINITY;
     return Math.max(0, this.maxMessages - this.messagesUsed);
@@ -105,14 +95,13 @@ export class Subscription {
     return isUnlimited(this.maxMessages);
   }
 
-  /** Inside its paid window at `now`. */
   isWithinPeriod(now: Date): boolean {
     return this.startDate.getTime() <= now.getTime() && now.getTime() < this.endDate.getTime();
   }
 
   /**
-   * Can this bundle serve a message right now? Cancelled bundles still can —
-   * cancellation ends renewal, not the period the user already paid for.
+   * Cancelled bundles still can: cancellation ends renewal, not the period
+   * the user already paid for.
    */
   canServe(now: Date): boolean {
     const servingStatus =
@@ -120,7 +109,6 @@ export class Subscription {
     return servingStatus && this.isWithinPeriod(now) && this.remainingMessages > 0;
   }
 
-  /** `true` when a renewal charge is due at `now`. */
   isDueForRenewal(now: Date): boolean {
     return (
       this.status === SubscriptionStatus.ACTIVE &&
